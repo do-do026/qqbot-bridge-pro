@@ -30,13 +30,49 @@ const DEFAULT_AUTO_REPLY_CONFIG = {
     waifuFlushSentences: 3,
     groupAggregateWindowMs: 25000,
     groupAggregateMaxItems: 10,
-    groupNicknameEnabled: true
+    groupNicknameEnabled: true,
+    c2cFixedBindings: []
 };
 let autoReplyTimerId = null;
 let autoReplyTickActive = false;
 const groupPendingBuckets = new Map();
 const groupNicknameCache = new Map();
 const GROUP_NICKNAME_TTL_MS = 3600000;
+function normalizeC2cFixedBindings(raw) {
+    let items = [];
+    if (Array.isArray(raw)) {
+        items = raw;
+    }
+    else if (typeof raw === "string" && (0, core.asText)(raw).trim()) {
+        try {
+            const parsed = JSON.parse((0, core.asText)(raw));
+            if (Array.isArray(parsed)) {
+                items = parsed;
+            }
+        }
+        catch (_error) { }
+    }
+    const result = [];
+    const seen = new Set();
+    for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        if (!(0, core.isObject)(item)) {
+            continue;
+        }
+        const openid = (0, core.asText)(item.openid).trim();
+        const chatId = (0, core.asText)(item.chatId).trim();
+        if (!openid || !chatId || seen.has(openid)) {
+            continue;
+        }
+        seen.add(openid);
+        result.push({
+            openid,
+            chatId,
+            title: (0, core.asText)(item.title).trim()
+        });
+    }
+    return result;
+}
 function normalizeAutoReplyConfig(raw) {
     const next = {
         ...DEFAULT_AUTO_REPLY_CONFIG
@@ -93,6 +129,9 @@ function normalizeAutoReplyConfig(raw) {
     if (groupNicknameEnabled !== undefined) {
         next.groupNicknameEnabled = groupNicknameEnabled;
     }
+    if ((0, core.hasOwn)(raw, "c2cFixedBindings")) {
+        next.c2cFixedBindings = normalizeC2cFixedBindings(raw.c2cFixedBindings);
+    }
     return next;
 }
 async function readAutoReplyConfigAsync() {
@@ -118,7 +157,8 @@ async function writeAutoReplyConfigAsync(config) {
             waifuFlushSentences: normalized.waifuFlushSentences,
             groupAggregateWindowMs: normalized.groupAggregateWindowMs,
             groupAggregateMaxItems: normalized.groupAggregateMaxItems,
-            groupNicknameEnabled: normalized.groupNicknameEnabled
+            groupNicknameEnabled: normalized.groupNicknameEnabled,
+            c2cFixedBindings: normalizeC2cFixedBindings(normalized.c2cFixedBindings)
         }
     });
     return normalized;
@@ -512,6 +552,19 @@ async function buildAutoReplyStatusAsync(options = {}) {
         } : {})
     };
 }
+function findC2cFixedBinding(config, userOpenId) {
+    const openid = (0, core.asText)(userOpenId).trim();
+    if (!openid || !Array.isArray(config.c2cFixedBindings)) {
+        return null;
+    }
+    for (let index = 0; index < config.c2cFixedBindings.length; index += 1) {
+        const item = config.c2cFixedBindings[index];
+        if (item && (0, core.asText)(item.openid).trim() === openid) {
+            return item;
+        }
+    }
+    return null;
+}
 async function ensureChatServiceReadyAsync() {
     await Tools.Chat.startService({
         initial_mode: "BALL",
@@ -525,17 +578,34 @@ async function resolveBoundChatIdAsync(config, event) {
     if (!conversationKey) {
         throw new Error("Unable to resolve conversation key for QQ event");
     }
-    const fixedTargetChatId = (0, core.firstNonBlank)((0, core.asText)(config.targetChatId).trim());
-    if (fixedTargetChatId) {
-        const findFixed = await Tools.Chat.findChat({
-            query: fixedTargetChatId,
-            match: "exact",
-            index: 0
-        });
-        if ((findFixed.chat?.id ?? "") === fixedTargetChatId) {
-            return fixedTargetChatId;
+    const scene = (0, core.asText)(event.scene).trim().toLowerCase();
+    if (scene === "c2c") {
+        const c2cBinding = findC2cFixedBinding(config, (0, core.asText)(event.userOpenId));
+        if (c2cBinding) {
+            const findFixed = await Tools.Chat.findChat({
+                query: c2cBinding.chatId,
+                match: "exact",
+                index: 0
+            });
+            if ((findFixed.chat?.id ?? "") === c2cBinding.chatId) {
+                return c2cBinding.chatId;
+            }
+            throw new Error(`QQ c2c fixed binding chat not found: ${c2cBinding.chatId}`);
         }
-        throw new Error(`QQ auto reply target chat not found: ${fixedTargetChatId}`);
+    }
+    else {
+        const fixedTargetChatId = (0, core.firstNonBlank)((0, core.asText)(config.targetChatId).trim());
+        if (fixedTargetChatId) {
+            const findFixed = await Tools.Chat.findChat({
+                query: fixedTargetChatId,
+                match: "exact",
+                index: 0
+            });
+            if ((findFixed.chat?.id ?? "") === fixedTargetChatId) {
+                return fixedTargetChatId;
+            }
+            throw new Error(`QQ auto reply target chat not found: ${fixedTargetChatId}`);
+        }
     }
     const store = await readAutoReplyStateStoreAsync();
     const bindings = {
@@ -1284,6 +1354,9 @@ async function qqbot_auto_reply_configure(params = {}) {
         }
         if ((0, core.hasOwn)(params, "group_nickname_enabled")) {
             patch.groupNicknameEnabled = (0, core.parseOptionalBoolean)(params.group_nickname_enabled, "group_nickname_enabled") === true;
+        }
+        if ((0, core.hasOwn)(params, "c2c_fixed_bindings")) {
+            patch.c2cFixedBindings = normalizeC2cFixedBindings(params.c2c_fixed_bindings);
         }
         let config = await updateAutoReplyConfigAsync(patch);
         const snapshot = await (0, state.readConfigSnapshotAsync)();
