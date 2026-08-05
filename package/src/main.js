@@ -13,9 +13,8 @@ function logStartup(message) {
 function registerToolPkg() {
     logStartup("registerToolPkg start");
 
-    // NOTE(T16): UI 模块（ui/qqbot_settings/index.ui.js）已完成，
-    // 但 debug_install_toolpkg 热烧录时 container 加载失败（包不进注册表）。
-    // 疑似 compose_dsl UI 模块需冷启动注册。核心链路优先，UI 待冷启动验证。
+    // NOTE(T16): 宿主对含 compose_dsl UI 模块的 ToolPkg 热烧录仍有 bug（container did not appear）。
+    // 2026-08-06 04:20 二次实测复现 → 保持注释，待宿主修复或走正常导入路径（.toolpkg 导入）。
     // const qqbotSettingsScreen = require("./ui/qqbot_settings/index.ui.js").default;
     // ToolPkg.registerToolboxUiModule({
     //     id: "qqbot_bridge_pro_settings",
