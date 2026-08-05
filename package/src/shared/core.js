@@ -189,6 +189,18 @@ async function openApiRequest(snapshot, path, method, body, timeoutMs) {
         timeoutMs
     );
 }
+async function fetchGroupMemberProfile(snapshot, groupOpenId, memberOpenId, timeoutMs) {
+    const gid = encodeURIComponent(asText(groupOpenId).trim());
+    const mid = encodeURIComponent(asText(memberOpenId).trim());
+    if (!gid || !mid) {
+        throw new Error("Missing group_openid or member_openid for group member profile");
+    }
+    const result = await openApiRequest(snapshot, `/v2/groups/${gid}/members/${mid}`, "GET", null, timeoutMs);
+    if (!result.success) {
+        throw new Error(firstNonBlank(asText(result.json.message), `HTTP ${result.statusCode}`));
+    }
+    return result.json;
+}
 function resolveTimeoutMs(value) {
     return parsePositiveInt(value, "timeout_ms", DEFAULT_TIMEOUT_MS);
 }
@@ -363,6 +375,7 @@ module.exports = {
     requireConfiguredSnapshot,
     fetchAccessToken,
     openApiRequest,
+    fetchGroupMemberProfile,
     requestJson,
     resolveTimeoutMs,
     buildSendBody,
