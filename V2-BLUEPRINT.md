@@ -1,7 +1,7 @@
 # qqbot-pro V2 蓝图（桥接整合版）
 
 > 用途：当前阶段唯一对照文档。先读本文件，再动手。
-> 维护：渡渡｜更新时间：2026-08-06 04:18｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分；**第十一节三连修复（nohup/探活/ws）+ B1 入队去重 + 空回复重试 全部完成**
+> 维护：渡渡｜更新时间：2026-08-06 04:50｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分；**第十一节三连修复（nohup/探活/ws）+ B1 入队去重 + 空回复重试 全部完成；第十二节蓝图重构（初尘 04:39 决策：群聚合优先 / G3 放弃 / C2C 分人 / B1 提前 / M3 降级 / UI 最后打包）**
 > 关联：`HANDOFF.md`（冷启动接续，含 04:05/04:18 修复快照）、`STATUS.md`（Sprint 状态）
 
 ---
@@ -170,9 +170,49 @@ com.operit.qqbot_pro v1.0.0
 
 ### M4 生命周期 + 收尾
 - [x] T13 main.js：app create/foreground/terminate → 自动启停 Gateway + 自动回复桥（从原包移植）✅ 切 app 自动拉起实测通过
-- [ ] T14 顶替原包验证：停原包 → 新包独立运行全链路 OK
+- [ ] T14 顶替原包验证：停原包 → 新包独立运行全链路 OK（挪至 S6）
 - [x] T15 文档同步（本文件状态更新）+ GitHub 推送（REST API）✅ 2026-08-06 02:40
-- [ ] T16（可选 P2）UI 设置页移植（qqbot_settings）
+- [ ] T16（可选 P2）UI 设置页移植（挪至 S5，做成一揽子设置页）
+
+---
+
+### 里程碑重构（第十二节，初尘 2026-08-06 04:39 决策）
+
+> 决策原文摘要：① 群聚合优先做，昵称尽力而为（群聊能带就带，私聊官方无接口）；② G3（群独立绑定）放弃；③ C2C 按人分对话——已知 openid 可绑指定对话（UI 管），其他 openid 自动按 c2c:openid 新建；④ B1 收尾优先；⑤ M3 流式只留架构位置；⑥ UI 等所有功能定型后一揽子打包；⑦ M4 T14 验证最后做。
+
+#### S1 B1 收尾：bridge 处理幂等（P0，群聚合前置）✅ 2026-08-06 04:50 代码+烧录，待实测
+- [x] 失败计数：同一 eventKey 处理失败（AI 空回复 3 次全败/发 QQ 失败）→ 失败计数 +1，达阈值（默认 3）→ 移除事件 + 记录 failure 状态
+- [x] 不再无限重试：当前实现失败后不移除、下个 tick 重试，极端情况同一条反复尝试
+- [ ] 出口：模拟连续失败，事件被移除且 records 有 failure 标记，不再重复处理
+
+#### S2 群聚合引擎（G1+G2 合并，P0）✅ 2026-08-06 04:57 代码+烧录（config 字段生效），待群实测
+- [x] 聚合窗口：tick 时按 group_openid 分桶；窗口 `groupAggregateWindowMs`（默认 25000，可配）到期 / 桶满 `groupAggregateMaxItems`（默认 10）→ flush 该群
+- [x] flush 拼接：`[昵称] 消息1\n[昵称] 消息2\n…`（昵称尽力而为，见下）
+- [x] 昵称获取（尽力而为）：`GET /v2/groups/{group_openid}/members/{member_openid}` → `username`（群昵称）；缓存 openid→昵称（TTL 1h，失败降级 openid 后 8 位）；**私聊 C2C 官方无用户资料接口，不做**
+- [x] 单次 Tools.Chat 桥接 → AI 自行选择感兴趣的条目回复（assistant_instruction 增强：群里只回应值得回的消息，可点名可不点名）
+- [x] 整批 eventKey 统一 remove（复用 gateway.removeGatewayEvents 数组入参）
+- [x] 与 waifu 切分兼容：聚合文本仍是 AI 回复，切分逻辑不变
+- [ ] 出口：群 5 人连续 @，Operit 对话只出现 1 条聚合 user 条目 + 1 条 AI 回复，QQ 群收到 1 条回复
+
+#### S3 C2C 分人对话（P1）
+- [ ] 配置新增：`c2cFixedBindings: [{ openid, chatId, title? }]`（数组，持久化到 config.json；UI 在 S5 管理）
+- [ ] resolveBoundChatIdAsync 改造：c2c 场景先查 fixedBindings → 命中用指定 chatId；未命中 → 自动按 `c2c:{openid}` 新建独立对话（现有 binding 机制已支持，放开即可）
+- [ ] **target_chat_id 在 C2C 场景退役**：不再让所有私聊挤进同一对话；群聊场景保留（无 target_chat_id 时按 `group:{gid}` 自动建，行为不变）
+- [ ] 出口：绑定 openid A → 消息进指定对话；未绑定 openid B → 自动新建独立对话；A/B 互不串，AI 不会混淆说话人
+
+#### S4 M3 流式架构预留（P2，本次可不做）
+- [ ] W1.1 仅此一项：core.js 新增 `sendStreamMessage` 基础请求函数（input_mode/input_state/index/content_type/content_raw/msg_id/event_id/stream_msg_id/msg_seq 全参数 + 错误码 40007/50001/50002 注释）
+- [ ] W1.2-W1.6（三态/封装/错误处理）后置，不封工具
+- [ ] 出口：函数存在，语法检查通过（不实际发消息）
+
+#### S5 T16 UI 一揽子（P2，最后做）
+- [ ] 设置页（compose_dsl，代码已有 616 行底子）扩为完整版：c2cFixedBindings 管理（openid↔对话绑定增删）、群聚合参数（窗口/桶容量/昵称开关）、waifu/桥配置、角色卡
+- [ ] 走外部 packages 导入链路打包 .toolpkg（绕开 debug_install_toolpkg 的 container 检查宿主 bug）
+- [ ] 出口：工具箱设置页可见可用，配置实时生效
+
+#### S6 M4 验证 + 推送（P2，最后做）
+- [ ] T14 顶替原包验证：原包保持停用，新包独立运行全链路
+- [ ] T15 GitHub 推送（REST API，勿 git push）
 
 ---
 
@@ -204,10 +244,13 @@ com.operit.qqbot_pro v1.0.0
 
 ## 9. 待确认 / 开放问题
 
-- [ ] 包名最终确认：`com.operit.qqbot_pro`（保留现名，版本升 v1.0.0）是否 OK？
-- [ ] 原包停用时机：M4 顶替验证时停，还是现在就停（避免双 Gateway 隐患）？
-- [ ] UI 设置页：M4 T16 是否要做（不着急的话 P2）
-- [ ] 群聊流式：官方文档没找到群 stream_messages，保持预留还是砍掉？
+- [x] 包名最终确认：`com.operit.qqbot_pro`（保留现名，版本升 v1.0.0）是否 OK？→ 已确认用 `com.operit.qqbot_bridge_pro` v1.0.0（第十二节）
+- [x] 原包停用时机：M4 顶替验证时停，还是现在就停 → 原包已停（防双 Gateway），新包独立运行中
+- [x] UI 设置页：M4 T16 是否要做 → 要做，挪到 S5 做成一揽子设置页（含 C2C 绑定管理）
+- [x] 群聊流式：官方文档没找到群 stream_messages → S4 仅预留单聊 W1.1，群流式砍掉
+- [x] G3 群独立绑定 → **放弃**（初尘：不记群友是谁，G3 很后排甚至放弃）
+- [x] 群昵称能力 → 官方有 `GET /v2/groups/{group_id}/members/{member_id}`（返回群昵称 username），S2 尽力而为实现
+- [x] C2C 昵称能力 → **官方无用户资料接口**（用户管理模块为空），私聊只能 openid 区分，不做昵称
 
 ---
 
@@ -215,19 +258,20 @@ com.operit.qqbot_pro v1.0.0
 
 ---
 
-## 10. 新会话接续指引（2026-08-06 04:18 快照）
+## 10. 新会话接续指引（2026-08-06 04:50 快照）
 
-**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 ✅ 已验证（T09 全链路 02:16 实测），M2 主动发送 ✅，M4 生命周期 ✅ 部分（hook 实测触发）；**第十一节三连修复完成**：nohup（gateway PPID=1 脱离 Operit）/ 探活 try-catch（gateway 死可重启）/ ws 握手超时+Accept 头（connected=true，botUsername=渡渡！♡）；B1 入队去重 + AI 空回复重试 已上线。
+**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 ✅ 已验证（T09 全链路 02:16 实测），M2 主动发送 ✅，M4 生命周期 ✅ 部分（hook 实测触发）；三连修复（nohup/探活/ws）+ B1 入队去重 + AI 空回复重试 已上线；**第十二节蓝图重构完成**（初尘 04:39 决策，见 §6 里程碑重构）：群聚合优先（G1+G2 合并为 S2）、G3 放弃、C2C 分人对话立项（S3）、B1 收尾提前（S1）、M3 降级仅留 W1.1（S4）、UI 最后统一打包（S5）、验证推送殿后（S6）。
 
 **工具可见性**：烧录后新工具需新会话可见（老规矩）。
 
 **下一步操作清单**：
 1. **初尘实测**：重启 Operit → `qqbot_pro_gateway_status` 应为 running:true（验证 nohup 存活）；QQ 发消息验证全链路无空回复
-2. **T16 UI**（P1）：打开 main.js（src+dist）UI 注册注释 → sync.sh → 烧录 → 验证工具存活；若宿主 UI bug 复现（registration session not active / container 不出现）则回滚注释
-3. **B1 剩余**：bridge 处理幂等（失败计数/移除策略）
-4. **G1 群消息聚合**（P0 初尘需求）→ G2/G3
-5. **M3 流式** W1.1-W1.6（P1）
-6. GitHub 推送（REST API，勿 git push）
+2. **S1 B1 收尾**（P0，群聚合前置）：bridge 失败计数/移除策略
+3. **S2 群聚合引擎**（P0）：聚合窗口 + 群昵称尽力而为（`/v2/groups/{gid}/members/{mid}` → username）+ AI 选择性回复
+4. **S3 C2C 分人对话**（P1）：c2cFixedBindings + 未绑定自动按 openid 建独立对话；target_chat_id 在 C2C 退役
+5. **S4 M3 流式预留**（P2）：core.js 只加 sendStreamMessage 基础函数
+6. **S5 UI 一揽子**（P2）：设置页含 c2cFixedBindings 管理，走外部 packages 导入链路
+7. **S6 T14 顶替验证 + T15 GitHub 推送**（P2，REST API，勿 git push）
 
 **包位置**：
 - 真相源：`/sdcard/Download/qqbot-bridge-pro/package/`
@@ -236,46 +280,53 @@ com.operit.qqbot_pro v1.0.0
 
 ---
 
-## 11. 新需求：群聊增强（2026-08-06 初尘提出）
+## 11. 新需求：会话管理增强（2026-08-06 初尘提出，04:39 重构版）
 
-> 场景：群里多人 @Bot 时，避免回复不过来、避免 Operit 对话被单条消息刷爆。
+> 场景：群里多人 @Bot 时避免回复不过来、避免 Operit 对话被单条消息刷爆；私聊多人时避免 AI 分不清谁在说话。
+> **重构（04:39 初尘决策）**：原 G1+G2 合并为 **S2 群聚合引擎**（P0）；**G3 群独立绑定放弃**；新增 **S3 C2C 分人对话**（P1）。
+> **昵称能力查证（04:41 官方文档）**：
+> - 群聊：`GET /v2/groups/{group_id}/members/{member_id}` → 返回 `username`（群昵称）、`member_role`（owner/admin/member）、`joined_at` ✅ **群聚合可带昵称**
+> - 私聊 C2C：官方"用户管理"模块无任何资料接口（只有机器人链接授权）❌ **C2C 拿不到昵称**，只能 openid 区分
 
-### G1 群消息聚合窗口（P1）
+### S2 群聚合引擎（P0，原 G1+G2）
 
-**目标**：轮询窗口内（默认 25s，可配）同一群的多条消息 → 整合成一条带昵称的落盘文本 → 一次 AI 调用回复 → 回复发回该群（一次）。
+**目标**：轮询窗口内（默认 25s，可配）同一群的多条消息 → 整合成一条**带昵称**的落盘文本 → 一次 AI 调用回复 → 回复发回该群（一次）。AI 自行选择感兴趣的条目回应，不刷屏，不记谁是谁。
 
-**设计草案**：
+**设计**：
 ```
 tick 时：对 group 事件按 group_openid 分组，落在窗口内的消息进 pending 桶
 窗口到期（或桶满 N 条 / 距首条超时）：flush 该群
-  → 拼接："[昵称A] 消息1\n[昵称B] 消息2\n…"（昵称来自 Gateway contacts 缓存 / 平台用户信息）
-  → 单次 Tools.Chat 桥接（同一绑定对话 or 群专属对话）
-  → AI 回复 → 发回群
+  → 昵称尽力而为：调 GET /v2/groups/{gid}/members/{mid} 拿群昵称
+     缓存 openid→昵称（TTL 1h）；接口失败降级 openid 后 8 位
+  → 拼接："[昵称A] 消息1\n[昵称B] 消息2\n…"
+  → 单次 Tools.Chat 桥接（沿用现有 binding 机制）
+  → AI 回复（assistant_instruction 引导：群里只回应值得回的消息）
   → 该批 eventKey 统一 remove
 ```
-**配置新增**：`groupAggregateWindowMs`（默认 25000）、`groupAggregateMaxItems`（默认 10）。
+
+**配置新增**：`groupAggregateWindowMs`（默认 25000）、`groupAggregateMaxItems`（默认 10）、`groupNicknameEnabled`（默认 true，昵称总开关，关掉纯 openid 尾号）。
 **出口标准**：群 5 人连续 @，Operit 对话只出现 1 条聚合 user 条目 + 1 条 AI 回复，QQ 群收到 1 条回复。
 
-### G2 AI 选择性回复（P1）
+### S3 C2C 分人对话（P1，新增）
 
-- 聚合模式下天然支持：AI 看到多条消息，自行决定回应谁、忽略谁（在回复里点名/不点名）。
-- 单条模式：`assistant_instruction` 增加引导（"群里只回应值得回的消息，避免每条都回"）。
-- 可选：`QQBOT_PRO_GROUP_RESPOND_AT_ONLY`（true=只回 @ 我的，默认 true——平台已过滤，天然满足）。
-- **出口标准**：AI 能对聚合消息挑重点回应，不刷屏。
+**目标**：私聊按人分对话，AI 不会把不同 QQ 用户当成同一个人。
 
-### G3 群独立绑定配置（P2）
+**设计**：
+```
+配置：c2cFixedBindings: [{ openid, chatId, title? }]（持久化 config.json，S5 UI 管理）
+resolveBoundChatIdAsync 改造（c2c 场景）：
+  ① 命中 c2cFixedBindings → 用指定 chatId（绑定的"熟人"固定对话）
+  ② 未命中 → 自动按 c2c:{openid} 新建独立对话（现有 binding 机制放开即可）
+target_chat_id：C2C 场景退役（不再让所有私聊挤同一对话）；群聊场景保留原行为
+```
 
-当前：`target_chat_id` 设置后 c2c+group 全部进同一对话；未设置时按 `group:group_openid` 自动创建群专属对话。
-新增配置：
-- `groupTargetChatId`（可选）：群消息固定落盘的对话；留空则沿用全局 target_chat_id
-- `groupAutoCreateChat`（默认 true）：false 时群消息不自动建对话，只回复不落盘（或落到全局对话）
-- **出口标准**：一个群一个独立对话（可配置），群聊不污染主对话。
+**出口标准**：绑定 openid A → 消息进指定对话；未绑定 openid B → 自动新建独立对话；A/B 互不串，AI 不会混淆说话人。
 
 ### 与现有里程碑的关系
 
-- B1（消息去重）是 G1 的前置（聚合窗口若收到重复事件会重复聚合）。
-- G1 落盘格式与 waifu 切分兼容（聚合文本仍是 AI 回复，切分逻辑不变）。
-- 实现位置：bridge_auto.js 的 `processAutoReplyQueueOnceAsync` 改造 + 配置项扩展。
+- S1（B1 幂等）是 S2 的前置（聚合窗口若收到重复事件会重复聚合；处理失败若不移除会反复重试）。
+- S2 落盘格式与 waifu 切分兼容（聚合文本仍是 AI 回复，切分逻辑不变）。
+- 实现位置：bridge_auto.js 的 `processAutoReplyQueueOnceAsync` 改造（群桶逻辑）+ `resolveBoundChatIdAsync` 改造（C2C 分人）+ core.js 新增昵称获取/缓存。
 
 ---
 
