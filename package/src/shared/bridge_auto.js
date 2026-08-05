@@ -15,6 +15,7 @@ module.exports = {
 };
 const WaifuMessageProcessor = Java.com.ai.assistance.operit.util.WaifuMessageProcessor;
 const DEFAULT_ASSISTANT_INSTRUCTION = "";
+const MAX_EVENT_PROCESS_FAIL_COUNT = 3;
 const DEFAULT_AUTO_REPLY_CONFIG = {
     enabled: false,
     pollIntervalMs: 3000,
@@ -26,10 +27,16 @@ const DEFAULT_AUTO_REPLY_CONFIG = {
     characterCardId: "",
     assistantInstruction: DEFAULT_ASSISTANT_INSTRUCTION,
     targetChatId: "",
-    waifuFlushSentences: 3
+    waifuFlushSentences: 3,
+    groupAggregateWindowMs: 25000,
+    groupAggregateMaxItems: 10,
+    groupNicknameEnabled: true
 };
 let autoReplyTimerId = null;
 let autoReplyTickActive = false;
+const groupPendingBuckets = new Map();
+const groupNicknameCache = new Map();
+const GROUP_NICKNAME_TTL_MS = 3600000;
 function normalizeAutoReplyConfig(raw) {
     const next = {
         ...DEFAULT_AUTO_REPLY_CONFIG
@@ -76,6 +83,16 @@ function normalizeAutoReplyConfig(raw) {
     if ((0, core.hasOwn)(raw, "waifuFlushSentences")) {
         next.waifuFlushSentences = (0, core.parsePositiveInt)(raw.waifuFlushSentences, "waifuFlushSentences", DEFAULT_AUTO_REPLY_CONFIG.waifuFlushSentences);
     }
+    if ((0, core.hasOwn)(raw, "groupAggregateWindowMs")) {
+        next.groupAggregateWindowMs = (0, core.parsePositiveInt)(raw.groupAggregateWindowMs, "groupAggregateWindowMs", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateWindowMs);
+    }
+    if ((0, core.hasOwn)(raw, "groupAggregateMaxItems")) {
+        next.groupAggregateMaxItems = (0, core.parsePositiveInt)(raw.groupAggregateMaxItems, "groupAggregateMaxItems", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateMaxItems);
+    }
+    const groupNicknameEnabled = (0, core.parseOptionalBoolean)(raw.groupNicknameEnabled, "groupNicknameEnabled");
+    if (groupNicknameEnabled !== undefined) {
+        next.groupNicknameEnabled = groupNicknameEnabled;
+    }
     return next;
 }
 async function readAutoReplyConfigAsync() {
@@ -98,7 +115,10 @@ async function writeAutoReplyConfigAsync(config) {
             characterCardId: normalized.characterCardId,
             assistantInstruction: normalized.assistantInstruction,
             targetChatId: normalized.targetChatId,
-            waifuFlushSentences: normalized.waifuFlushSentences
+            waifuFlushSentences: normalized.waifuFlushSentences,
+            groupAggregateWindowMs: normalized.groupAggregateWindowMs,
+            groupAggregateMaxItems: normalized.groupAggregateMaxItems,
+            groupNicknameEnabled: normalized.groupNicknameEnabled
         }
     });
     return normalized;
@@ -170,6 +190,45 @@ function trimRecordMap(records) {
         next[item.key] = item.value;
     });
     return next;
+}
+async function incrementEventProcessFailCountAsync(eventKey, errorText) {
+    const records = await readAutoReplyRecordsAsync();
+    const existing = records[eventKey] ?? {};
+    const failCount = (Number(existing.failCount ?? 0) || 0) + 1;
+    records[eventKey] = {
+        ...existing,
+        status: "processing_failed",
+        failCount,
+        lastError: (0, core.asText)(errorText),
+        updatedAt: new Date().toISOString()
+    };
+    await writeAutoReplyRecordsAsync(records);
+    return failCount;
+}
+async function markEventProcessFailedAsync(eventKey, errorText) {
+    const records = await readAutoReplyRecordsAsync();
+    const existing = records[eventKey] ?? {};
+    records[eventKey] = {
+        ...existing,
+        status: "failed",
+        failCount: Number(existing.failCount ?? 0) || 0,
+        lastError: (0, core.asText)(errorText),
+        updatedAt: new Date().toISOString()
+    };
+    await writeAutoReplyRecordsAsync(records);
+}
+async function clearEventProcessFailCountAsync(eventKey) {
+    const records = await readAutoReplyRecordsAsync();
+    const existing = records[eventKey];
+    if (!existing || (existing.failCount === undefined && existing.lastError === undefined)) {
+        return;
+    }
+    records[eventKey] = {
+        ...existing,
+        failCount: 0,
+        lastError: ""
+    };
+    await writeAutoReplyRecordsAsync(records);
 }
 async function readActiveAutoReplyContextAsync() {
     const storedConfig = await (0, state.readPersistedConfigAsync)();
@@ -416,6 +475,8 @@ function summarizeRecords(records) {
             key,
             status: entry?.status ?? "",
             chatId: entry?.chatId ?? "",
+            failCount: Number(entry?.failCount ?? 0) || 0,
+            lastError: entry?.lastError ?? "",
             updatedAt: entry?.updatedAt ?? ""
         };
     });
@@ -547,7 +608,7 @@ async function resolveBoundChatIdAsync(config, event) {
     await flushAutoReplyStateStoreAsync();
     return chatId;
 }
-async function generateAiReplyAsync(config, event, eventKey, onIntermediateResult) {
+async function generateAiReplyAsync(config, event, eventKey, onIntermediateResult, options = {}) {
     const records = await readAutoReplyRecordsAsync();
     const existing = records[eventKey];
     const existingReply = (0, core.firstNonBlank)(existing?.aiResponse ?? "");
@@ -558,7 +619,7 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
         };
     }
     const chatId = await resolveBoundChatIdAsync(config, event);
-    const userMessage = await buildInboundChatMessage(config, event);
+    const userMessage = (0, core.asText)(options.userMessage).trim() || await buildInboundChatMessage(config, event);
     const MAX_EMPTY_RETRIES = 3;
     let aiResponse = "";
     let sendResult = null;
@@ -648,6 +709,164 @@ async function sendReplyToQQAsync(event, replyText, msgSeq = 1) {
         openid,
         response: response.json
     };
+}
+function shortOpenId(openid) {
+    const text = (0, core.asText)(openid).trim();
+    if (!text) {
+        return "?";
+    }
+    return text.length <= 4 ? text : text.slice(-4);
+}
+async function resolveGroupNicknameAsync(snapshot, groupOpenId, memberOpenId) {
+    const cacheKey = `${groupOpenId}|${memberOpenId}`;
+    const cached = groupNicknameCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < GROUP_NICKNAME_TTL_MS) {
+        return cached.nickname;
+    }
+    try {
+        const profile = await (0, core.fetchGroupMemberProfile)(snapshot, groupOpenId, memberOpenId, 8000);
+        const nickname = (0, core.asText)(profile.username).trim();
+        if (nickname) {
+            groupNicknameCache.set(cacheKey, { nickname, fetchedAt: Date.now() });
+            return nickname;
+        }
+    }
+    catch (_error) { }
+    return "";
+}
+async function buildGroupAggregateMessageAsync(config, snapshot, events) {
+    const lines = [];
+    for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        const memberOpenId = (0, core.firstNonBlank)((0, core.asText)(event.userOpenId).trim(), (0, core.asText)(event.authorId).trim());
+        let label = "";
+        if (config.groupNicknameEnabled && memberOpenId && (0, core.asText)(event.groupOpenId).trim()) {
+            const nickname = await resolveGroupNicknameAsync(snapshot, (0, core.asText)(event.groupOpenId).trim(), memberOpenId);
+            label = nickname || `QQ${shortOpenId(memberOpenId)}`;
+        }
+        else {
+            label = `QQ${shortOpenId(memberOpenId)}`;
+        }
+        const content = (0, core.asText)(event.content).trim();
+        const attachmentTags = await materializeQQInboundAttachmentsAsync(event);
+        const suffix = attachmentTags.length > 0 ? ` ${attachmentTags.join(" ")}` : "";
+        lines.push(`[${label}] ${content}${suffix}`);
+    }
+    return lines.join("\n");
+}
+function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregatedCount) {
+    const contentLines = [
+        "scene: group",
+        "sceneLabel: QQ群消息聚合",
+        `aggregatedCount: ${aggregatedCount}`,
+        `messageId: ${(0, core.asText)(aggregateEvent.messageId).trim()}`,
+        `groupOpenId: ${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`,
+        "",
+        "instruction: 这是群内多条消息聚合后的结果（已标注发言者）。请从中选择值得回应的内容回复，可点名回应某位群友，也可以整体回应；不要逐条回复，不要刷屏。"
+    ];
+    const content = contentLines.join("\n");
+    const attachmentId = `GROUP_AGGREGATE:${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`;
+    return `<attachment id="${escapeXml(attachmentId)}" filename="qq_group_aggregate_context.txt" type="text/plain" size="${content.length}">${escapeXml(content)}</attachment>`;
+}
+async function flushGroupBucketAsync(config, groupOpenId, bucket) {
+    const events = bucket.events;
+    const snapshot = await (0, state.requireConfiguredSnapshotAsync)();
+    const aggregateText = await buildGroupAggregateMessageAsync(config, snapshot, events);
+    const lastEvent = events[events.length - 1];
+    const aggregateEventKey = `GROUP_AGGREGATE:${groupOpenId}:${Date.now()}`;
+    const aggregateEvent = {
+        ...lastEvent,
+        content: aggregateText,
+        eventId: aggregateEventKey,
+        messageId: (0, core.asText)(lastEvent.messageId).trim(),
+        scene: "group",
+        groupOpenId,
+        userOpenId: "",
+        authorId: ""
+    };
+    const userMessage = [aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
+    const generated = await generateAiReplyAsync(config, aggregateEvent, aggregateEventKey, undefined, { userMessage });
+    const aiResponse = (0, core.asText)(generated.aiResponse).trim();
+    await sendReplyToQQAsync(lastEvent, aiResponse, 1);
+    const eventKeys = [];
+    for (let index = 0; index < events.length; index += 1) {
+        const eventKey = buildEventKey(events[index]);
+        if (eventKey) {
+            eventKeys.push(eventKey);
+        }
+    }
+    if (eventKeys.length > 0) {
+        await gateway.removeGatewayEvents(eventKeys, 8000);
+    }
+    const records = await readAutoReplyRecordsAsync();
+    const nowIso = new Date().toISOString();
+    for (let index = 0; index < events.length; index += 1) {
+        const eventKey = buildEventKey(events[index]);
+        if (!eventKey) {
+            continue;
+        }
+        records[eventKey] = {
+            status: "aggregated_replied",
+            chatId: (0, core.asText)(generated.chatId).trim(),
+            aiResponse,
+            failCount: 0,
+            lastError: "",
+            updatedAt: nowIso,
+            scene: "group",
+            messageId: (0, core.asText)(events[index].messageId).trim(),
+            aggregateKey: aggregateEventKey
+        };
+    }
+    await writeAutoReplyRecordsAsync(records);
+    return {
+        eventKey: aggregateEventKey,
+        chatId: (0, core.asText)(generated.chatId).trim(),
+        replyPreview: aiResponse.slice(0, 200),
+        aggregatedCount: events.length,
+        sendResult: {
+            scene: "group",
+            groupOpenId,
+            aggregated: true
+        }
+    };
+}
+async function flushDueGroupBucketsAsync(config) {
+    const now = Date.now();
+    const windowMs = Math.max(Number(config.groupAggregateWindowMs) || 0, 0);
+    const maxItems = Math.max(Number(config.groupAggregateMaxItems) || 1, 1);
+    const entries = Array.from(groupPendingBuckets.entries());
+    for (let index = 0; index < entries.length; index += 1) {
+        const [gid, bucket] = entries[index];
+        const due = bucket.events.length >= maxItems || (windowMs > 0 && now - bucket.firstAt >= windowMs);
+        if (!due || bucket.events.length === 0) {
+            continue;
+        }
+        groupPendingBuckets.delete(gid);
+        try {
+            const flushResult = await flushGroupBucketAsync(config, gid, bucket);
+            return { flushed: true, result: flushResult };
+        }
+        catch (error) {
+            const errorText = (0, core.safeErrorMessage)(error);
+            const removedKeys = [];
+            for (let eventIndex = 0; eventIndex < bucket.events.length; eventIndex += 1) {
+                const eventKey = buildEventKey(bucket.events[eventIndex]);
+                if (!eventKey) {
+                    continue;
+                }
+                const failCount = await incrementEventProcessFailCountAsync(eventKey, errorText);
+                if (failCount >= MAX_EVENT_PROCESS_FAIL_COUNT) {
+                    await markEventProcessFailedAsync(eventKey, errorText);
+                    removedKeys.push(eventKey);
+                }
+            }
+            if (removedKeys.length > 0) {
+                await gateway.removeGatewayEvents(removedKeys, 8000);
+            }
+            return { flushed: false, error: errorText };
+        }
+    }
+    return { flushed: false };
 }
 function classifyEvent(config, event, serviceState) {
     const scene = (0, core.asText)(event.scene).trim().toLowerCase();
@@ -787,17 +1006,21 @@ async function processAutoReplyQueueOnceAsync(source) {
     });
     const queue = Array.isArray(queueResult.events) ? queueResult.events : [];
     if (queue.length === 0) {
+        const flushOutcome = await flushDueGroupBucketsAsync(activeContext.config);
+        const flushItems = flushOutcome.flushed ? [flushOutcome.result] : [];
         await updateAutoReplyRuntimeAsync({
             running: autoReplyTimerId != null,
             status: "idle",
             lastPollAt: new Date().toISOString(),
-            lastError: ""
+            lastError: flushOutcome.flushed ? "" : (0, core.asText)(flushOutcome.error)
         });
         return {
             success: true,
             packageVersion: core.PACKAGE_VERSION,
-            processedCount: 0,
+            processedCount: flushItems.length,
             skippedCount: 0,
+            processedItems: flushItems,
+            skippedItems: [],
             queueRemainingCount: 0
         };
     }
@@ -837,13 +1060,69 @@ async function processAutoReplyQueueOnceAsync(source) {
             queueRemainingCount -= 1;
             continue;
         }
-        const result = await processSingleEventAsync(latestContext.config, event);
-        processedCount += 1;
-        processedItems.push(result);
-        if (eventKey) {
-            await gateway.removeGatewayEvents([eventKey], 8000);
+        const eventScene = (0, core.asText)(event.scene).trim().toLowerCase();
+        const aggregateWindowMs = (0, core.parsePositiveInt)(latestContext.config.groupAggregateWindowMs, "groupAggregateWindowMs", 0);
+        if (eventScene === "group" && aggregateWindowMs > 0) {
+            const groupOpenId = (0, core.asText)(event.groupOpenId).trim();
+            if (groupOpenId) {
+                let bucket = groupPendingBuckets.get(groupOpenId);
+                if (!bucket) {
+                    bucket = { events: [], firstAt: Date.now(), lastAt: Date.now() };
+                    groupPendingBuckets.set(groupOpenId, bucket);
+                }
+                const alreadyInBucket = bucket.events.some((existing) => buildEventKey(existing) === eventKey);
+                if (!alreadyInBucket) {
+                    bucket.events.push(event);
+                    bucket.lastAt = Date.now();
+                }
+                queueRemainingCount -= 1;
+                continue;
+            }
         }
-        queueRemainingCount -= 1;
+        let result = null;
+        let processErrorText = "";
+        try {
+            result = await processSingleEventAsync(latestContext.config, event);
+        }
+        catch (error) {
+            processErrorText = (0, core.safeErrorMessage)(error);
+        }
+        if (result) {
+            processedCount += 1;
+            processedItems.push(result);
+            if (eventKey) {
+                await gateway.removeGatewayEvents([eventKey], 8000);
+            }
+            await clearEventProcessFailCountAsync(eventKey);
+            queueRemainingCount -= 1;
+        }
+        else {
+            const failCount = await incrementEventProcessFailCountAsync(eventKey, processErrorText);
+            if (failCount >= MAX_EVENT_PROCESS_FAIL_COUNT) {
+                if (eventKey) {
+                    await gateway.removeGatewayEvents([eventKey], 8000);
+                }
+                await markEventProcessFailedAsync(eventKey, processErrorText);
+                skippedCount += 1;
+                skippedItems.push({
+                    eventKey,
+                    reason: `failed_after_${failCount}_tries: ${processErrorText}`
+                });
+                queueRemainingCount -= 1;
+            }
+            else {
+                skippedCount += 1;
+                skippedItems.push({
+                    eventKey,
+                    reason: `retry_pending_${failCount}/${MAX_EVENT_PROCESS_FAIL_COUNT}: ${processErrorText}`
+                });
+            }
+        }
+    }
+    const flushOutcome = await flushDueGroupBucketsAsync(latestContext.config);
+    if (flushOutcome.flushed) {
+        processedCount += 1;
+        processedItems.push(flushOutcome.result);
     }
     const currentRuntime = await readAutoReplyRuntimeAsync();
     await updateAutoReplyRuntimeAsync({
@@ -996,6 +1275,15 @@ async function qqbot_auto_reply_configure(params = {}) {
         }
         if ((0, core.hasOwn)(params, "waifu_flush_sentences")) {
             patch.waifuFlushSentences = (0, core.parsePositiveInt)(params.waifu_flush_sentences, "waifu_flush_sentences", before.waifuFlushSentences);
+        }
+        if ((0, core.hasOwn)(params, "group_aggregate_window_ms")) {
+            patch.groupAggregateWindowMs = (0, core.parsePositiveInt)(params.group_aggregate_window_ms, "group_aggregate_window_ms", before.groupAggregateWindowMs);
+        }
+        if ((0, core.hasOwn)(params, "group_aggregate_max_items")) {
+            patch.groupAggregateMaxItems = (0, core.parsePositiveInt)(params.group_aggregate_max_items, "group_aggregate_max_items", before.groupAggregateMaxItems);
+        }
+        if ((0, core.hasOwn)(params, "group_nickname_enabled")) {
+            patch.groupNicknameEnabled = (0, core.parseOptionalBoolean)(params.group_nickname_enabled, "group_nickname_enabled") === true;
         }
         let config = await updateAutoReplyConfigAsync(patch);
         const snapshot = await (0, state.readConfigSnapshotAsync)();
