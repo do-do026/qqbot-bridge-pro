@@ -125,15 +125,21 @@ async function readServiceLogTail(maxChars) {
 }
 
 async function httpToControl(path, body, timeoutMs) {
-    const response = await Tools.Net.http({
-        url: `http://127.0.0.1:${SERVICE_PORT}${path}`,
-        method: body ? "POST" : "GET",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: body || undefined,
-        connect_timeout: Math.max(2, Math.ceil((timeoutMs || 5000) / 1000)),
-        read_timeout: Math.max(2, Math.ceil((timeoutMs || 5000) / 1000)),
-        validateStatus: false
-    });
+    let response;
+    try {
+        response = await Tools.Net.http({
+            url: `http://127.0.0.1:${SERVICE_PORT}${path}`,
+            method: body ? "POST" : "GET",
+            headers: { "Content-Type": "application/json; charset=utf-8" },
+            body: body || undefined,
+            connect_timeout: Math.max(2, Math.ceil((timeoutMs || 5000) / 1000)),
+            read_timeout: Math.max(2, Math.ceil((timeoutMs || 5000) / 1000)),
+            validateStatus: false
+        });
+    } catch (error) {
+        // 连接被拒/超时 = 服务未运行，返回失败而非抛异常，让调用方走"未运行→启动"分支
+        return { success: false, statusCode: 0, json: {}, error: core.safeErrorMessage(error) };
+    }
     let json = {};
     try {
         const trimmed = core.asText(response && response.content).trim();
@@ -175,7 +181,7 @@ async function qqbot_pro_gateway_start(params) {
         const controlToken = `qqbot_pro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
         const intents = String((1 << 30) | (1 << 12) | (1 << 25) | (1 << 26)); // 含 INTERACTION
         const command = [
-            "python3", `'${scriptPath}'`,
+            "nohup", "python3", `'${scriptPath}'`,
             "--state-dir", `'${STATE_DIR}'`,
             "--app-id", `'${snapshot.appId}'`,
             "--app-secret", `'${snapshot.appSecret}'`,
@@ -322,7 +328,7 @@ async function ensureGatewayStarted(options) {
     const controlToken = `qqbot_pro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     const intents = String((1 << 30) | (1 << 12) | (1 << 25) | (1 << 26));
     const command = [
-        "python3", `'${scriptPath}'`,
+        "nohup", "python3", `'${scriptPath}'`,
         "--state-dir", `'${STATE_DIR}'`,
         "--app-id", `'${snapshot.appId}'`,
         "--app-secret", `'${snapshot.appSecret}'`,
