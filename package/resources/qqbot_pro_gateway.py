@@ -89,7 +89,8 @@ class SimpleWebSocketClient:
             sock = context.wrap_socket(raw_sock, server_hostname=host)
         else:
             sock = raw_sock
-        sock.settimeout(self.timeout)
+        # 握手阶段用宽超时：腾讯网关对 101 响应的延迟可能超过轮询超时（1s）
+        sock.settimeout(max(self.timeout, 10.0))
         self.sock = sock
 
         key = base64.b64encode(os.urandom(16)).decode("ascii")
@@ -101,6 +102,7 @@ class SimpleWebSocketClient:
             "Connection: Upgrade",
             f"Sec-WebSocket-Key: {key}",
             "Sec-WebSocket-Version: 13",
+            "Accept: application/json",
             "User-Agent: OperitQQBotGateway/0.3.0",
             "",
             "",
@@ -124,6 +126,9 @@ class SimpleWebSocketClient:
         expected_accept = base64.b64encode(hashlib.sha1((key + self.GUID).encode("utf-8")).digest()).decode("ascii")
         if headers.get("sec-websocket-accept") != expected_accept:
             raise RuntimeError("invalid websocket accept header")
+
+        # 握手完成：切回轮询超时（空闲读超时 = 心跳轮询间隔）
+        sock.settimeout(self.timeout)
 
     def _recv_until(self, marker: bytes) -> bytes:
         while marker not in self.buffer:
@@ -575,6 +580,12 @@ class QQBotGatewayService:
 
     def append_event(self, event):
         with self.lock:
+            event_key = first_non_blank(event.get("eventKey"))
+            if event_key:
+                for item in reversed(self.queue):
+                    if first_non_blank(item.get("eventKey")) == event_key:
+                        # 已存在同 eventKey：去重（防 ws 重连重推/重复入队）
+                        return
             self.queue.append(event)
             if len(self.queue) > MAX_QUEUE_ITEMS:
                 self.queue = self.queue[-MAX_QUEUE_ITEMS:]
