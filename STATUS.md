@@ -35,7 +35,7 @@
 
 ## 3. 🐛 已知问题（Known Issues）
 
-1. **消息重复到达**（P1，本次实测发现）：同一 messageId 在绑定对话出现多条 user 条目（"试一下——"出现 2 次、"喵喵喵…"出现 2 次），其中一次触发 AI 空回复；runtime.lastError 曾出现 `AI returned an empty response` 与 `消息被去重，请检查请求msgseq`。疑似 Gateway 事件入队无按 eventKey 去重 + 处理失败重试导致重复投递。→ 修复方向：Gateway 入队去重 + 桥处理按 eventKey 幂等。
+1. **消息重复到达（B1）——真相修正**（2026-08-06 03:10）：经查证，重复条目的根因**不是 Gateway 去重缺失，而是原包与新包同时运行**——02:15 初尘从原包 UI 按下监听开关激活原包桥（startSource=qqbot_auto_reply_configure，02:15:18），原包 Gateway（32145）与新包 Gateway（32146）同 AppID 并存，同一消息被两个包各自处理（"试一下——"收到"菇咕弹…"与"通了通了…"两条不同回复）。→ 修复方向改为：**顶替验证时确保原包完全停止**（listenerEnabled=false + 停 Gateway 进程），B1 的"入队去重"降级为防御性改进。
 2. **腾讯网关必须带 `Accept: application/json` 头**（P1，本次实测踩坑）：不带返回 `{"code":100007,"message":"appid invalid"}`，极易误导排查凭证。core.js 已带，但任何手写调用必须注意。
 3. **子包烧录后启用状态未保留**：`debug_install_toolpkg` 的 `reset_subpackage_states=true` 会把子包启用状态重置，导致工具数 0。本次已用 `activate_subpackages` 显式激活修复。
 4. **`listenerEnabled` 无代码置 true**：gateway.js 不写该字段，bridge 只在 false 时把 enabled 打回 false——首次配置必须手工写 config.json。
