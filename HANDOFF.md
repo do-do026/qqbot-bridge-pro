@@ -39,6 +39,7 @@ QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
 6. **消息重复到达**（P1 已知问题）：同一 messageId 多次处理（对话出现重复条目 + 偶发 AI 空回复）。修复方向：Gateway 入队按 eventKey 去重 + 桥处理幂等（B1）。
 7. **状态目录隔离**：新包用 `getPluginConfigDir(com.operit.qqbot_bridge_pro)`（=/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro），与原包物理隔离。
 8. **真相源**：`/sdcard/Download/qqbot-bridge-pro/package/`，dev_package 由 `scripts/sync.sh` 覆盖，别直接改 dev_package。
+9. **软链接不可行**（实测）：Android /sdcard（FUSE）不允许 `ln -s`（Permission denied），不要试图用软链统一 dev_package 与主目录；双副本漂移靠 sync.sh 单向同步解决（qqbot-pro 已验证此方案）。
 
 ## 3. 下一步（新会话照此执行）
 
