@@ -46,7 +46,7 @@
 | 凭证耦合 | 复用 QQBOT_APP_ID/SECRET，无独立覆盖位 | P2 |
 | 无错误码映射 | 40007/50002 等未细化 | P2 |
 | src/dist 手动同步 | sync.sh cp 单向 | 流程债 |
-| UI 设置页 | T16 代码完成（616 行）但宿主 UI 加载 bug 阻塞注册 | P2→阻塞中 |
+| UI 设置页 | T16 代码完成（616 行）。宿主热烧录 container bug + .toolpkg 外部导入也失败（Cannot resolve module）→ 已回滚无 UI 版。T16 留待宿主修复或换方案 | P2→阻塞中 |
 
 ## 5. 📋 待办清单（Backlog，第十二节重构版）
 
@@ -55,7 +55,7 @@
 - [x] **空回复重试** ✅ 2026-08-06 04:18
 - [x] **S1 B1 收尾**（P0，群聚合前置）：bridge 处理失败计数/移除策略（当前失败不移除、下个 tick 重试）✅ 2026-08-06 04:50 代码+烧录（failCount/lastError 已生效，待实测）
 - [x] **S2 群聚合引擎**（P0）：窗口聚合（默认 25s/10 条，可配）+ 群昵称尽力而为（`GET /v2/groups/{gid}/members/{mid}` → username，缓存 TTL 1h，失败降级 openid 尾号）+ 单次 AI 调用选择性回复 + 整批 remove ✅ 2026-08-06 04:57 代码+烧录（config 字段已生效，待群实测）
-- [ ] **S3 C2C 分人对话**（P1）：c2cFixedBindings（指定 openid 绑固定对话）+ 未绑定自动按 c2c:openid 新建；target_chat_id 在 C2C 退役
+- [x] **S3 C2C 分人对话**（P1）：c2cFixedBindings（指定 openid 绑固定对话）+ 未绑定自动按 c2c:openid 新建；target_chat_id 在 C2C 退役 ✅ 2026-08-06 05:05 代码+烧录（config 已绑定初尘 openid，待多用户实测）
 - [ ] **S4 流式架构预留**（P2）：core.js 只加 sendStreamMessage 基础函数（W1.1），W1.2-W1.6 后置
 - [ ] **S5 T16 UI 一揽子**（P2，最后做）：设置页含 c2cFixedBindings 管理 + 群聚合参数，走外部 packages 导入链路
 - [ ] **S6 T14 顶替原包验证**（原包已停，新包独立运行中）+ T15 GitHub 推送（本次迭代未推，待推）
