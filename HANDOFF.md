@@ -42,12 +42,25 @@ QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
 
 ## 3. 下一步（新会话照此执行）
 
+> ⚠️ **2026-08-06 03:25 紧急状态快照（第十节收尾）**：
+> - **原包已停**（config listenerEnabled=false + Gateway 进程已杀）✅ 不会互踢
+> - **新包已烧录**（主包 enabled:true，18 工具注册）✅
+> - **Gateway 当前未运行**（手动起的进程会被 Operit 重启杀掉，非持久方案）
+> - **桥未运行**（hooks 当前不触发——宿主 ToolPkg UI/hook 加载存在 bug，moodlet 等带 UI 包同样报 `toolpkg registration session is not active`）
+> - **接管动作（新会话做）**：
+>   1. `qqbot_pro_gateway_start`（宿主管理进程，重启后可恢复）
+>   2. `qqbot_pro_bridge_start`（启动自动回复桥，轮询 32146）
+>   3. 初尘给 QQ bot 发消息 → 验证纯新包链路（原包已停，不会再重复）
+> - **B1 真相**：此前"消息重复"= 原包+新包同时运行各自处理（02:15 初尘按原包 UI 激活了原包桥），不是 Gateway 去重 bug。原包停止后此问题自愈。
+> - **T16 UI**：代码完成（612 行，含群增强 G1/G3 预留），但宿主对 ToolPkg UI 模块热/冷加载均有 bug（registration session not active），注册暂时注释保留，待宿主修复或走市场导入路径。
+
 1. 新会话验证工具可见 → `qqbot_pro_bridge_status` / `qqbot_pro_gateway_status`
-2. **B1 消息去重修复**（P0，群场景前置）
-3. **G1 群消息聚合窗口**（P0，初尘需求，见 BLUEPRINT §11）
-4. G2 选择性回复 / G3 群独立绑定（P1/P2）
-5. M3 流式 W1.1-W1.6（P1）
-6. M4 T14 顶替原包验证 / T16 UI 设置页（P2）
+2. **接管**：`qqbot_pro_gateway_start` → `qqbot_pro_bridge_start` → 全链路验证
+3. **B1 收尾**：原包保持停用（防双包），"入队去重"降级为防御性改进
+4. **G1 群消息聚合窗口**（P0，初尘需求，见 BLUEPRINT §11）
+5. G2 选择性回复 / G3 群独立绑定（P1/P2）
+6. M3 流式 W1.1-W1.6（P1）
+7. **T16 UI**：待宿主修复后启用注册，或验证市场导入路径
 
 ## 4. 文件地图
 
