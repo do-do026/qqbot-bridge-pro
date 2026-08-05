@@ -41,6 +41,7 @@
 4. **`listenerEnabled` 无代码置 true**：gateway.js 不写该字段，bridge 只在 false 时把 enabled 打回 false——首次配置必须手工写 config.json。
 5. **群消息处理无 @ 检查 + 串行**：classifyEvent 无 mention 判断（依赖 QQ 平台只推 @ 消息），每条群消息独立 AI 调用且串行（ai_timeout_ms=180s），群消息风暴会积压延迟。
 6. **原包 src/dist 漂移**：只从 dist 移植，不反向同步 src（流程债）。
+7. **T16 UI 热烧录 container 加载失败**（本次实测）：`registerToolboxUiModule` 注册（文件版/内联版均试）会导致 `debug_install_toolpkg` 报 "container did not appear"，包不进注册表。UI 代码已完成（`src/ui/qqbot_settings/index.ui.js`，616 行，含群增强预留），main.js 中注册已注释。疑似 compose_dsl UI 模块需冷启动注册或宿主热烧录兼容限制 → 待冷启动/新会话验证。
 
 ## 4. 💰 技术债（Tech Debt）
 
@@ -65,7 +66,7 @@
 - [ ] M3 W1.1-W1.6 流式发送（单聊 stream_messages 三态 + 错误处理）【P1】
 - [ ] M4 T14 顶替原包验证（停原包 → 新包独立运行全链路 OK）【P1】
 - [ ] M4 T15 GitHub 推送（本次已推 ✅，后续每次迭代同步）
-- [ ] M4 T16 UI 设置页移植【P2】
+- [ ] M4 T16 UI 设置页移植【P2→进行中】：代码已完成（616 行，凭证/自动化/绑定对话/群增强预留 G1-G3/运行控制），热烧录 container 加载失败，待冷启动验证后启用注册
 
 ## 6. 🔁 当前架构完成情况（Reuse Status）
 
