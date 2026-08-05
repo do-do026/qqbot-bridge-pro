@@ -558,16 +558,28 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
         };
     }
     const chatId = await resolveBoundChatIdAsync(config, event);
-    const sendResult = await Tools.Chat.sendMessageStreaming(await buildInboundChatMessage(config, event), chatId, config.characterCardId || undefined, undefined, {
-        waifu: config.waifu,
-        persist_turn: true,
-        notify_reply: false,
-        hide_user_message: false,
-        disable_warning: true,
-        timeout_ms: config.aiTimeoutMs,
-        onIntermediateResult
-    });
-    const aiResponse = sanitizeAiReplyText((sendResult.aiResponse ?? "").trim());
+    const userMessage = await buildInboundChatMessage(config, event);
+    const MAX_EMPTY_RETRIES = 3;
+    let aiResponse = "";
+    let sendResult = null;
+    for (let attempt = 1; attempt <= MAX_EMPTY_RETRIES; attempt += 1) {
+        sendResult = await Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
+            waifu: config.waifu,
+            persist_turn: true,
+            notify_reply: false,
+            hide_user_message: false,
+            disable_warning: true,
+            timeout_ms: config.aiTimeoutMs,
+            onIntermediateResult
+        });
+        aiResponse = sanitizeAiReplyText((sendResult.aiResponse ?? "").trim());
+        if (aiResponse) {
+            break;
+        }
+        if (attempt < MAX_EMPTY_RETRIES) {
+            await Tools.System.sleep(attempt * 5000);
+        }
+    }
     if (!aiResponse) {
         throw new Error("AI returned an empty response for QQ auto reply");
     }
