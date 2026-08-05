@@ -1,7 +1,7 @@
 # qqbot-bridge-pro 冷启动接续文档（HANDOFF）
 
 > 用途：新窗口 AI 接续本工程的唯一入口。读完本文件 + 两份配套文档即可独立工作。
-> 更新时间：2026-08-06 04:05｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅，M4 生命周期 ✅ 部分，**2026-08-06 04:05 三连修复完成（nohup/探活/ws）**
+> 更新时间：2026-08-06 04:50｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅，M4 生命周期 ✅ 部分，**04:05 三连修复（nohup/探活/ws）+ 04:18 B1 去重/空回复重试 + 04:50 蓝图重构（S1-S6）**
 
 ---
 
@@ -51,14 +51,22 @@ QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
 > - **2026-08-06 04:18 加固（B1 去重 + 空回复重试）**：① gateway.py append_event 增加 eventKey 去重（同一条消息 ws 重推不再重复入队，实测"走走"此前被处理 3 次）；② bridge_auto.js generateAiReplyAsync 增加空回复自动重试（最多 3 次，5s/10s 间隔），AI 偶发空回复自愈，不再落盘空条目干等。两者已烧录并重启验证（Gateway connected + Bridge idle）。
 > - **待办验证**：① 重启 Operit 验证 gateway 存活（预期存活）② QQ 发消息验证全链路 ③ 群聊/图片/主动发送补测。
 > - **注意**：部署脚本位于 `/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro/qqbot_pro_gateway.py`，改 resource 后需手动覆盖（start 只在脚本不存在时复制）；`readResource` 在当前会话曾失败，已用 cp 解决。
+> - **2026-08-06 04:50 蓝图重构（第十二节，初尘 04:39 决策）**：
+>   - **昵称查证**：群聊可带昵称（`GET /v2/groups/{gid}/members/{mid}` → username）；**C2C 官方无用户资料接口，私聊带不了昵称**（用户管理模块为空）。
+>   - **G1+G2 合并为 S2 群聚合引擎**（P0）：聚合窗口默认 25s/10 条（可配）+ 群昵称尽力而为（失败降级 openid 尾号）+ AI 自行选择条目回复 + 整批 remove。
+>   - **G3 放弃**（不记群友是谁）。
+>   - **新增 S3 C2C 分人对话**（P1）：c2cFixedBindings（已知 openid 绑指定对话，UI 管）+ 未绑定自动按 c2c:openid 新建独立对话；**target_chat_id 在 C2C 场景退役**（群聊保留）。
+>   - **S1 B1 收尾**（P0，群聚合前置）：失败计数/移除策略。**S4 流式**只留 W1.1 基础函数（P2）。**S5 UI** 一揽子最后打包（含 c2cFixedBindings 管理）。**S6** T14 验证 + T15 推送殿后。
+>   - 详见 V2-BLUEPRINT.md §6 里程碑重构 + §11。
 
 1. 新会话验证工具可见 → `qqbot_pro_bridge_status` / `qqbot_pro_gateway_status`
 2. **接管**：`qqbot_pro_gateway_start` → `qqbot_pro_bridge_start` → 全链路验证
-3. **B1 收尾**：原包保持停用（防双包），"入队去重"降级为防御性改进
-4. **G1 群消息聚合窗口**（P0，初尘需求，见 BLUEPRINT §11）
-5. G2 选择性回复 / G3 群独立绑定（P1/P2）
-6. M3 流式 W1.1-W1.6（P1）
-7. **T16 UI**：待宿主修复后启用注册，或验证市场导入路径
+3. **S1 B1 收尾**（P0）：bridge 失败计数/移除策略（原包保持停用，防双包）
+4. **S2 群聚合引擎**（P0，初尘需求，见 BLUEPRINT §11 S2）：聚合窗口 + 群昵称尽力而为 + AI 选择性回复
+5. **S3 C2C 分人对话**（P1）：c2cFixedBindings + 未绑定自动分人；target_chat_id 在 C2C 退役
+6. **S4 流式预留**（P2）：core.js 只加 sendStreamMessage（W1.1）
+7. **S5 UI 一揽子**（P2，最后）：设置页含 c2cFixedBindings 管理，走外部 packages 导入链路（绕开 container 检查宿主 bug）
+8. **S6**：T14 顶替原包验证 + T15 GitHub 推送
 
 ## 4. 文件地图
 
