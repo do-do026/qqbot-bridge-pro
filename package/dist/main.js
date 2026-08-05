@@ -1,0 +1,51 @@
+/*
+ * qqbot-bridge-pro 主入口
+ * 基于 qqbot-pro main.js 扩展：注册生命周期 hooks（自动启停增强 Gateway + 自动回复桥）
+ * 工具由 manifest 的 subpackages 机制自动加载（dist/packages/*.js 的 METADATA 块）。
+ */
+"use strict";
+const bridgeAuto = require("./shared/bridge_auto.js");
+
+function logStartup(message) {
+    console.log(`[qqbot-bridge-pro] ${message}`);
+}
+
+function registerToolPkg() {
+    logStartup("registerToolPkg start");
+
+    // NOTE(T16): UI 模块（ui/qqbot_settings/index.ui.js）已完成，
+    // 但 debug_install_toolpkg 热烧录时 container 加载失败（包不进注册表）。
+    // 疑似 compose_dsl UI 模块需冷启动注册。核心链路优先，UI 待冷启动验证。
+    // const qqbotSettingsScreen = require("./ui/qqbot_settings/index.ui.js").default;
+    // ToolPkg.registerToolboxUiModule({
+    //     id: "qqbot_bridge_pro_settings",
+    //     runtime: "compose_dsl",
+    //     screen: qqbotSettingsScreen,
+    //     params: {},
+    //     title: { zh: "QQ Bot Bridge Pro 设置", en: "QQ Bot Bridge Pro Settings" }
+    // });
+
+    // 自动回复桥生命周期：app 创建/前台 → 自动拉起 Gateway + 桥；终止 → 停桥
+    ToolPkg.registerAppLifecycleHook({
+        id: "qqbot_bridge_auto_app_create",
+        event: "application_on_create",
+        function: bridgeAuto.onQQBotAutoReplyApplicationCreate
+    });
+    ToolPkg.registerAppLifecycleHook({
+        id: "qqbot_bridge_auto_app_foreground",
+        event: "application_on_foreground",
+        function: bridgeAuto.onQQBotAutoReplyApplicationForeground
+    });
+    ToolPkg.registerAppLifecycleHook({
+        id: "qqbot_bridge_auto_app_terminate",
+        event: "application_on_terminate",
+        function: bridgeAuto.onQQBotAutoReplyApplicationTerminate
+    });
+
+    logStartup("registerToolPkg done");
+    return true;
+}
+
+module.exports = {
+    registerToolPkg
+};
