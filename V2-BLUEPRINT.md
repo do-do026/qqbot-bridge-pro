@@ -1,7 +1,7 @@
 # qqbot-pro V2 蓝图（桥接整合版）
 
 > 用途：当前阶段唯一对照文档。先读本文件，再动手。
-> 维护：渡渡｜更新时间：2026-08-06 01:45｜状态：M0 ✅ 完成，M1 代码完成待真实验证
+> 维护：渡渡｜更新时间：2026-08-06 02:40｜状态：M0 ✅ 完成，M1 ✅ 已验证，M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分
 > 关联：`HANDOFF.md`（V1 冷启动文档，M1 完成 v0.2.0 的历史快照）、`ARCHITECTURE.md`（V1 架构）、`STATUS.md`（V1 状态）
 
 ---
@@ -148,13 +148,13 @@ com.operit.qqbot_pro v1.0.0
 - [x] T06 gateway.js 工具层对齐统一 Gateway（新增 ensureGatewayStarted/queryGatewayEvents/removeGatewayEvents 等底层导出）（start/stop/status/receive/clear 指向同一服务）
 - [x] T07 bridge_auto.js 移植（dist 新版，waifu 三句切分/绑定对话/环境变量全保留）：轮询队列 → Tools.Chat 桥接 → waifu 三句切分 → 发回 QQ
 - [x] T08 qqbot_pro_bridge.js 工具定义（configure/status/start/stop/run_once）（configure/status/start/stop/run_once，含 target_chat_id / waifu_flush_sentences / 角色卡 / QQBOT_PRO_AUTO_REPLY）
-- [ ] T09 端到端验证：QQ 发消息 → Operit 指定对话出 AI 回复 → 桥回 QQ（waifu 3 句切分生效）
+- [x] T09 端到端验证：QQ 发消息 → Operit 指定对话出 AI 回复 → 桥回 QQ（waifu 3 句切分生效）✅ 2026-08-06 02:16 实测通过
 - ✅ 出口：真实 QQ→AI→QQ 全链路通，绑定对话生效，waifu 切分生效
 
 ### M2 AI 主动发送（工作流场景）
-- [ ] T10 `qqbot_pro_list_targets`：读 env 候选列表返回给 AI
-- [ ] T11 `qqbot_pro_send` 支持主动模式（不传 msg_id）+ 候选列表兜底取目标
-- [ ] T12 群/个人分开处理 + 错误提示（无候选时明确报错引导配置 env）
+- [x] T10 `qqbot_pro_list_targets`：读 env 候选列表返回给 AI ✅（已实现，env 已配）
+- [x] T11 `qqbot_pro_send` 支持主动模式（不传 msg_id）+ 候选列表兜底取目标 ✅（已实现；主动发送 HTTP 实测通过）
+- [ ] T12 群/个人分开处理 + 错误提示（send 候选兜底已实现，错误提示待完善）
 - ✅ 出口：工作流里 AI 调 send 能主动发到指定 QQ/群
 
 ### M3 流式发送（最小子任务拆分）
@@ -169,9 +169,9 @@ com.operit.qqbot_pro v1.0.0
 - ✅ 出口：send_stream 单聊三态全通，错误码处理正确
 
 ### M4 生命周期 + 收尾
-- [ ] T13 main.js：app create/foreground/terminate → 自动启停 Gateway + 自动回复桥（从原包移植）
+- [x] T13 main.js：app create/foreground/terminate → 自动启停 Gateway + 自动回复桥（从原包移植）✅ 切 app 自动拉起实测通过
 - [ ] T14 顶替原包验证：停原包 → 新包独立运行全链路 OK
-- [ ] T15 文档同步（本文件状态更新）+ GitHub 推送（REST API）
+- [x] T15 文档同步（本文件状态更新）+ GitHub 推送（REST API）✅ 2026-08-06 02:40
 - [ ] T16（可选 P2）UI 设置页移植（qqbot_settings）
 
 ---
@@ -217,24 +217,65 @@ com.operit.qqbot_pro v1.0.0
 
 ## 10. 新会话接续指引（2026-08-06 01:45 快照）
 
-**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 代码完成（bridge_auto 移植 + gateway 统一）**待真实验证**。
+**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 ✅ 已验证（T09 全链路 02:16 实测通过），M2 主动发送 ✅ 实测，M4 生命周期 ✅（T13 切 app 自动拉起）。
 
 **工具可见性**：`debug_install_toolpkg` 注册的新工具**当前会话不可见**，必须**新开会话**才能看到 `qqbot_bridge_pro_*` 工具。
 
-**下一步操作清单（新会话执行）**：
-1. `qqbot_bridge_pro_bridge:qqbot_pro_bridge_configure` 迁移原包配置：
-   - enabled=true, chat_group="QQ Bot"
-   - target_chat_id="166abbb7-969d-4b24-b90d-60366681ecd8"（原包绑定对话）
-   - character_card_id="b89f6656-a296-426c-8b98-94493e7f8a72"
-   - assistant_instruction="你是渡渡。这是从QQ桥接过来的消息，请自然回复对方。回复发给QQ，注意：不要主动打扰对方、不要发无关的主动消息，只在对方发来消息时响应。"
-   - waifu_flush_sentences=3, start_now=true
-2. 若 Gateway 未自动起：`qqbot_bridge_pro_gateway:qqbot_pro_gateway_start`（端口 32146，同 AppID 与原包二选一，原包已停 ✅）
-3. 让初尘给 QQ bot 发一条消息 → 验证：Gateway 收到 → 桥接 Operit 指定对话 → AI 回复 → waifu 三句切分 → 发回 QQ
-4. `qqbot_pro_bridge_status` 检查 bindings/records；`qqbot_pro_gateway_status` 检查连接
-5. AI 主动发送候选：环境变量 `QQBOT_PRO_TARGET_OPENIDS`（个人 openid，逗号分隔）、`QQBOT_PRO_TARGET_GROUP_OPENIDS`（群 group_openid）→ `qqbot_pro_list_targets` 查看 → `qqbot_pro_send` / `qqbot_pro_send_image` 发送
-6. 验证通过后：GitHub REST API 推送 + 更新本文档状态
+**下一步操作清单（新会话执行，当前链路已通，以下为增量）**：
+1. （已完成 ✅）桥配置已迁移落盘：listenerEnabled=true、target_chat_id=166abbb7-…、角色卡、渡渡指令、waifu=3；Gateway 已运行（32146）
+2. 新会话验证工具可见：`qqbot_pro_bridge_status` / `qqbot_pro_gateway_status` 检查
+3. 群聊验证：拉群 → @Bot → 观察回复（群聚合 G1 未实现前，群消息逐条处理）
+4. AI 主动发送（工具链）：`qqbot_pro_list_targets` → `qqbot_pro_send`（候选 QQBOT_PRO_TARGET_OPENIDS=CC9F593975D8C8F1E1EC72DD91305C63 已配）
+5. 已知问题优先项：B1 消息去重 → G1 群聚合 → M3 流式（见 STATUS.md §5）
 
 **包位置**：
 - 真相源：`/sdcard/Download/qqbot-bridge-pro/package/`
 - dev_package：`/sdcard/Download/Operit/dev_package/qqbot_bridge_pro/`
 - 安装产物：`com.operit.qqbot_bridge_pro.toolpkg`（外部 packages 目录）
+
+---
+
+## 11. 新需求：群聊增强（2026-08-06 初尘提出）
+
+> 场景：群里多人 @Bot 时，避免回复不过来、避免 Operit 对话被单条消息刷爆。
+
+### G1 群消息聚合窗口（P1）
+
+**目标**：轮询窗口内（默认 25s，可配）同一群的多条消息 → 整合成一条带昵称的落盘文本 → 一次 AI 调用回复 → 回复发回该群（一次）。
+
+**设计草案**：
+```
+tick 时：对 group 事件按 group_openid 分组，落在窗口内的消息进 pending 桶
+窗口到期（或桶满 N 条 / 距首条超时）：flush 该群
+  → 拼接："[昵称A] 消息1\n[昵称B] 消息2\n…"（昵称来自 Gateway contacts 缓存 / 平台用户信息）
+  → 单次 Tools.Chat 桥接（同一绑定对话 or 群专属对话）
+  → AI 回复 → 发回群
+  → 该批 eventKey 统一 remove
+```
+**配置新增**：`groupAggregateWindowMs`（默认 25000）、`groupAggregateMaxItems`（默认 10）。
+**出口标准**：群 5 人连续 @，Operit 对话只出现 1 条聚合 user 条目 + 1 条 AI 回复，QQ 群收到 1 条回复。
+
+### G2 AI 选择性回复（P1）
+
+- 聚合模式下天然支持：AI 看到多条消息，自行决定回应谁、忽略谁（在回复里点名/不点名）。
+- 单条模式：`assistant_instruction` 增加引导（"群里只回应值得回的消息，避免每条都回"）。
+- 可选：`QQBOT_PRO_GROUP_RESPOND_AT_ONLY`（true=只回 @ 我的，默认 true——平台已过滤，天然满足）。
+- **出口标准**：AI 能对聚合消息挑重点回应，不刷屏。
+
+### G3 群独立绑定配置（P2）
+
+当前：`target_chat_id` 设置后 c2c+group 全部进同一对话；未设置时按 `group:group_openid` 自动创建群专属对话。
+新增配置：
+- `groupTargetChatId`（可选）：群消息固定落盘的对话；留空则沿用全局 target_chat_id
+- `groupAutoCreateChat`（默认 true）：false 时群消息不自动建对话，只回复不落盘（或落到全局对话）
+- **出口标准**：一个群一个独立对话（可配置），群聊不污染主对话。
+
+### 与现有里程碑的关系
+
+- B1（消息去重）是 G1 的前置（聚合窗口若收到重复事件会重复聚合）。
+- G1 落盘格式与 waifu 切分兼容（聚合文本仍是 AI 回复，切分逻辑不变）。
+- 实现位置：bridge_auto.js 的 `processAutoReplyQueueOnceAsync` 改造 + 配置项扩展。
+
+---
+
+*本文件由渡渡维护。每个里程碑完成必须同步更新（✅ 标记 + HANDOFF.md + GitHub）。*
