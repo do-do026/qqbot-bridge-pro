@@ -194,10 +194,10 @@ com.operit.qqbot_pro v1.0.0
 - [x] 与 waifu 切分兼容：聚合文本仍是 AI 回复，切分逻辑不变
 - [ ] 出口：群 5 人连续 @，Operit 对话只出现 1 条聚合 user 条目 + 1 条 AI 回复，QQ 群收到 1 条回复
 
-#### S3 C2C 分人对话（P1）
-- [ ] 配置新增：`c2cFixedBindings: [{ openid, chatId, title? }]`（数组，持久化到 config.json；UI 在 S5 管理）
-- [ ] resolveBoundChatIdAsync 改造：c2c 场景先查 fixedBindings → 命中用指定 chatId；未命中 → 自动按 `c2c:{openid}` 新建独立对话（现有 binding 机制已支持，放开即可）
-- [ ] **target_chat_id 在 C2C 场景退役**：不再让所有私聊挤进同一对话；群聊场景保留（无 target_chat_id 时按 `group:{gid}` 自动建，行为不变）
+#### S3 C2C 分人对话（P1）✅ 2026-08-06 05:05 代码+烧录，待多用户实测
+- [x] 配置新增：`c2cFixedBindings: [{ openid, chatId, title? }]`（数组，持久化到 config.json；UI 在 S5 管理）
+- [x] resolveBoundChatIdAsync 改造：c2c 场景先查 fixedBindings → 命中用指定 chatId；未命中 → 自动按 `c2c:{openid}` 新建独立对话（现有 binding 机制已支持，放开即可）
+- [x] **target_chat_id 在 C2C 场景退役**：不再让所有私聊挤进同一对话；群聊场景保留（无 target_chat_id 时按 `group:{gid}` 自动建，行为不变）
 - [ ] 出口：绑定 openid A → 消息进指定对话；未绑定 openid B → 自动新建独立对话；A/B 互不串，AI 不会混淆说话人
 
 #### S4 M3 流式架构预留（P2，本次可不做）
