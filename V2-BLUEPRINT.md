@@ -1,8 +1,8 @@
 # qqbot-pro V2 蓝图（桥接整合版）
 
 > 用途：当前阶段唯一对照文档。先读本文件，再动手。
-> 维护：渡渡｜更新时间：2026-08-06 02:40｜状态：M0 ✅ 完成，M1 ✅ 已验证，M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分
-> 关联：`HANDOFF.md`（V1 冷启动文档，M1 完成 v0.2.0 的历史快照）、`ARCHITECTURE.md`（V1 架构）、`STATUS.md`（V1 状态）
+> 维护：渡渡｜更新时间：2026-08-06 04:18｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分；**第十一节三连修复（nohup/探活/ws）+ B1 入队去重 + 空回复重试 全部完成**
+> 关联：`HANDOFF.md`（冷启动接续，含 04:05/04:18 修复快照）、`STATUS.md`（Sprint 状态）
 
 ---
 
@@ -215,23 +215,24 @@ com.operit.qqbot_pro v1.0.0
 
 ---
 
-## 10. 新会话接续指引（2026-08-06 01:45 快照）
+## 10. 新会话接续指引（2026-08-06 04:18 快照）
 
-**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 ✅ 已验证（T09 全链路 02:16 实测通过），M2 主动发送 ✅ 实测，M4 生命周期 ✅（T13 切 app 自动拉起）。
+**当前进度**：M0 ✅ 全绿（18 工具已烧录），M1 ✅ 已验证（T09 全链路 02:16 实测），M2 主动发送 ✅，M4 生命周期 ✅ 部分（hook 实测触发）；**第十一节三连修复完成**：nohup（gateway PPID=1 脱离 Operit）/ 探活 try-catch（gateway 死可重启）/ ws 握手超时+Accept 头（connected=true，botUsername=渡渡！♡）；B1 入队去重 + AI 空回复重试 已上线。
 
-**工具可见性**：`debug_install_toolpkg` 注册的新工具**当前会话不可见**，必须**新开会话**才能看到 `qqbot_bridge_pro_*` 工具。
+**工具可见性**：烧录后新工具需新会话可见（老规矩）。
 
-**下一步操作清单（新会话执行，当前链路已通，以下为增量）**：
-1. （已完成 ✅）桥配置已迁移落盘：listenerEnabled=true、target_chat_id=166abbb7-…、角色卡、渡渡指令、waifu=3；Gateway 已运行（32146）
-2. 新会话验证工具可见：`qqbot_pro_bridge_status` / `qqbot_pro_gateway_status` 检查
-3. 群聊验证：拉群 → @Bot → 观察回复（群聚合 G1 未实现前，群消息逐条处理）
-4. AI 主动发送（工具链）：`qqbot_pro_list_targets` → `qqbot_pro_send`（候选 QQBOT_PRO_TARGET_OPENIDS=CC9F593975D8C8F1E1EC72DD91305C63 已配）
-5. 已知问题优先项：B1 消息去重 → G1 群聚合 → M3 流式（见 STATUS.md §5）
+**下一步操作清单**：
+1. **初尘实测**：重启 Operit → `qqbot_pro_gateway_status` 应为 running:true（验证 nohup 存活）；QQ 发消息验证全链路无空回复
+2. **T16 UI**（P1）：打开 main.js（src+dist）UI 注册注释 → sync.sh → 烧录 → 验证工具存活；若宿主 UI bug 复现（registration session not active / container 不出现）则回滚注释
+3. **B1 剩余**：bridge 处理幂等（失败计数/移除策略）
+4. **G1 群消息聚合**（P0 初尘需求）→ G2/G3
+5. **M3 流式** W1.1-W1.6（P1）
+6. GitHub 推送（REST API，勿 git push）
 
 **包位置**：
 - 真相源：`/sdcard/Download/qqbot-bridge-pro/package/`
 - dev_package：`/sdcard/Download/Operit/dev_package/qqbot_bridge_pro/`
-- 安装产物：`com.operit.qqbot_bridge_pro.toolpkg`（外部 packages 目录）
+- 部署脚本：`/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro/qqbot_pro_gateway.py`（改 resource 后需手动 cp 覆盖，start 只在脚本不存在时复制）
 
 ---
 
