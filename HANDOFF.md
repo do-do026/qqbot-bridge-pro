@@ -1,7 +1,7 @@
 # qqbot-bridge-pro 冷启动接续文档（HANDOFF）
 
 > 用途：新窗口 AI 接续本工程的唯一入口。读完本文件 + 两份配套文档即可独立工作。
-> 更新时间：2026-08-06 02:45｜状态：M0 ✅，M1 ✅ 已验证（T09 全链路通），M2 主动发送 ✅ 实测，M4 生命周期 ✅ 部分（T13 通过）
+> 更新时间：2026-08-06 04:05｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅，M4 生命周期 ✅ 部分，**2026-08-06 04:05 三连修复完成（nohup/探活/ws）**
 
 ---
 
@@ -43,17 +43,14 @@ QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
 
 ## 3. 下一步（新会话照此执行）
 
-> ⚠️ **2026-08-06 03:25 紧急状态快照（第十节收尾）**：
-> - **原包已停**（config listenerEnabled=false + Gateway 进程已杀）✅ 不会互踢
-> - **新包已烧录**（主包 enabled:true，18 工具注册）✅
-> - **Gateway 当前未运行**（手动起的进程会被 Operit 重启杀掉，非持久方案）
-> - **桥未运行**（hooks 当前不触发——宿主 ToolPkg UI/hook 加载存在 bug，moodlet 等带 UI 包同样报 `toolpkg registration session is not active`）
-> - **接管动作（新会话做）**：
->   1. `qqbot_pro_gateway_start`（宿主管理进程，重启后可恢复）
->   2. `qqbot_pro_bridge_start`（启动自动回复桥，轮询 32146）
->   3. 初尘给 QQ bot 发消息 → 验证纯新包链路（原包已停，不会再重复）
-> - **B1 真相**：此前"消息重复"= 原包+新包同时运行各自处理（02:15 初尘按原包 UI 激活了原包桥），不是 Gateway 去重 bug。原包停止后此问题自愈。
-> - **T16 UI**：代码完成（612 行，含群增强 G1/G3 预留），但宿主对 ToolPkg UI 模块热/冷加载均有 bug（registration session not active），注册暂时注释保留，待宿主修复或走市场导入路径。
+> ✅ **2026-08-06 04:05 状态快照（三连修复完成）**：
+> - **修复① 缺 nohup**（移植回归）：gateway 启动命令补上 `nohup`（src+dist 的 qqbot_pro_gateway_start / ensureGatewayStarted 两处）。实测进程 PPID=1，已脱离 Operit 进程树，Operit 重启杀不掉，与原包 gateway 同等存活能力。
+> - **修复② 探活抛异常**（httpToControl 未捕获 Tools.Net.http 连接失败）：导致 isServiceRunning() 直接抛异常 → ensureGatewayStarted 永远中断在"判断是否运行"，进程永远起不来 + gateway/bridge start 全部 Step error。已加 try-catch，连接失败返回"未运行"→正常走启动分支。
+> - **修复③ ws 握手超时 + 缺 Accept 头**（qqbot_pro_gateway.py SimpleWebSocketClient）：默认 1s socket 超时导致握手阶段 read timeout；握手头缺 `Accept: application/json`。已改为握手阶段宽超时（10s）+ 补 Accept 头 + 握手完成后切回轮询超时。
+> - **当前实况（04:05 实测）**：Gateway running=true connected=true，botUsername=渡渡！♡，pid 29543，PPID=1；Bridge running=true status=idle（3s 轮询中），target_chat_id=166abbb7… 绑定保留。
+> - **2026-08-06 04:18 加固（B1 去重 + 空回复重试）**：① gateway.py append_event 增加 eventKey 去重（同一条消息 ws 重推不再重复入队，实测"走走"此前被处理 3 次）；② bridge_auto.js generateAiReplyAsync 增加空回复自动重试（最多 3 次，5s/10s 间隔），AI 偶发空回复自愈，不再落盘空条目干等。两者已烧录并重启验证（Gateway connected + Bridge idle）。
+> - **待办验证**：① 重启 Operit 验证 gateway 存活（预期存活）② QQ 发消息验证全链路 ③ 群聊/图片/主动发送补测。
+> - **注意**：部署脚本位于 `/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro/qqbot_pro_gateway.py`，改 resource 后需手动覆盖（start 只在脚本不存在时复制）；`readResource` 在当前会话曾失败，已用 cp 解决。
 
 1. 新会话验证工具可见 → `qqbot_pro_bridge_status` / `qqbot_pro_gateway_status`
 2. **接管**：`qqbot_pro_gateway_start` → `qqbot_pro_bridge_start` → 全链路验证
@@ -74,10 +71,36 @@ QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
 ├── package/           ← 包源码（真相源）
 │   ├── manifest.json  ← toolpkg_id: com.operit.qqbot_bridge_pro
 │   ├── resources/qqbot_pro_gateway.py  ← 增强版 Gateway（端口 32146）
-│   ├── src/main.js / shared/ / packages/
+│   ├── src/main.js / shared/ / packages/ / ui/
 │   └── dist/          ← 与 src 手动同步（手写 JS 无编译）
 └── scripts/sync.sh    ← 同步 dev_package + 语法检查
 ```
+
+## 5. 手动打包 .toolpkg SOP（手机全流程，无需电脑）
+
+> 背景：`debug_install_toolpkg`（热烧录）对含 compose_dsl UI 的包会报 `container did not appear`（宿主 bug，2026-08-06 04:20 二次复现）。
+> 替代路径：手动打包 `.toolpkg` 放入外部 packages 目录，走**正常导入扫描链路**（phase=external），可能绕过热烧录的 container 检查。待验证。
+
+```bash
+# ① 准备：打开 main.js（src+dist）的 UI 注册注释 → bash scripts/sync.sh
+# ② 让 dist/ui 用真正的设置页（src 616 行版），清掉测试屏和嵌套残留
+cd /sdcard/Download/Operit/dev_package/qqbot_bridge_pro
+cp src/ui/qqbot_settings/index.ui.js dist/ui/qqbot_settings/index.ui.js
+rm -rf dist/ui/ui
+# ③ 打成 zip → .toolpkg
+rm -f /sdcard/Download/qqbot_bridge_pro_ui.toolpkg
+zip -r /sdcard/Download/qqbot_bridge_pro_ui.toolpkg manifest.json src dist resources
+# ④ 导入：放入 Operit 外部 packages 目录（同名覆盖 = 升级/回滚）
+cp /sdcard/Download/qqbot_bridge_pro_ui.toolpkg /sdcard/Android/data/com.ai.assistance.operit/files/packages/
+# ⑤ 验证：包管理界面看包是否在、工具是否可见、工具箱是否有设置页
+#    回滚：把 packages 目录里的 .toolpkg 换回无 UI 版（重新 debug_install_toolpkg 即可）
+```
+
+**注意事项**：
+- `.toolpkg` = zip，根目录直接是 manifest.json / src / dist / resources（无外层文件夹）
+- 打包前必须确认 main.js 的 UI 注册是打开状态，否则打了也白打
+- 导入路径走的是 Operit 外部包扫描（scan candidate phase=external），与热烧录不同链路
+- 若导入后工具消失 → 立即用 `debug_install_toolpkg`（无 UI 版）回滚恢复
 
 ---
 
