@@ -13,6 +13,18 @@ function logStartup(message) {
 function registerToolPkg() {
     logStartup("registerToolPkg start");
 
+    // NOTE(T16): UI 模块（ui/qqbot_settings/index.ui.js）已完成，
+    // 但 debug_install_toolpkg 热烧录时 container 加载失败（包不进注册表）。
+    // 疑似 compose_dsl UI 模块需冷启动注册。核心链路优先，UI 待冷启动验证。
+    // const qqbotSettingsScreen = require("./ui/qqbot_settings/index.ui.js").default;
+    // ToolPkg.registerToolboxUiModule({
+    //     id: "qqbot_bridge_pro_settings",
+    //     runtime: "compose_dsl",
+    //     screen: qqbotSettingsScreen,
+    //     params: {},
+    //     title: { zh: "QQ Bot Bridge Pro 设置", en: "QQ Bot Bridge Pro Settings" }
+    // });
+
     // 自动回复桥生命周期：app 创建/前台 → 自动拉起 Gateway + 桥；终止 → 停桥
     ToolPkg.registerAppLifecycleHook({
         id: "qqbot_bridge_auto_app_create",
