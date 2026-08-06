@@ -46,7 +46,7 @@
 - 图片目录专用浏览/筛选 API。
 - access token 缓存。
 - QQ `err_code` 结构化映射和 Trace ID。
-- “QQ 已发送但队列移除失败”的事务级幂等恢复。
+- "QQ 已发送但队列移除失败"的事务级幂等恢复。
 - C2C 固定绑定失效时的自动降级策略。
 
 ## 应放弃或明确限制
@@ -57,29 +57,40 @@
 - 官方流式发送：技术上可做，但产品蓝图已放弃，本包不注册工具。
 - 脚本自行修复 Operit compose_dsl 宿主加载器：不属于插件能力范围。
 
-## 14:32 新需求状态（尚未实施）
+## 14:32 新需求状态
 
 | 目标能力 | 状态 | 默认/边界 |
 |---|---|---|
-| 每群首条 @ 起算独立窗口 | 📋规划完成 | 默认60000ms，可UI/API/env改 |
-| 普通群消息仅作上下文、不唤醒AI | 📋规划完成 | 默认at_only |
-| 前后文三态 | 📋规划完成 | off/automatic/agent_on_demand，默认off |
-| 前后文条数 | 📋规划完成 | 前5/后5，单次最多20 |
-| 单群安全保留 | 📋规划完成 | 默认最新30条 |
-| 全局群上下文缓存 | 📋规划完成 | 建议默认最新100条 |
-| 到期群并发flush | 📋规划完成 | 默认3，安全范围1～8 |
+| 唯一配置 schema（G0） | ✅代码完成 | bridge_config.js：26字段、schema v2、clamp+迁移 |
+| 每群首条 @ 起算独立窗口 | 📋规划完成（G1实施） | 默认60000ms，可UI/API/env改；配置层已生效 |
+| 普通群消息仅作上下文、不唤醒AI | 📋规划完成（G1实施） | 默认at_only；配置层已生效 |
+| 前后文三态 | 📋规划完成（G2实施） | off/automatic/agent_on_demand，默认off；配置层已生效 |
+| 前后文条数 | 📋规划完成（G2实施） | 前5/后5，单次最多20；配置层已生效 |
+| 单群安全保留 | ✅代码完成 | 默认最新30条；不再提前flush，只保留最新+overflow计数 |
+| 全局群上下文缓存 | 📋规划完成（G1实施） | 建议默认最新100条；配置层已生效 |
+| 到期群并发flush | 📋规划完成（G1实施） | 默认3，安全范围1～8；配置层已生效 |
 | 编号replyTo/引用目标 | 📋规划完成 | 只让@触发消息成为候选 |
 | 过期主动发送/放弃 | 📋规划完成 | 根据AI fallbackPreference并记录原因 |
-| 换行参与Waifu | 📋规划完成 | 连续换行归一化后计一次 |
+| 换行参与Waifu | 📋规划完成（G4实施） | 连续换行归一化后计一次 |
 | 桥接Prompt不落盘 | 🔬有参考路径待验证 | before_send_to_model Finalize Hook |
 | C2C/群桥接独立开关 | 底层已有，待重构验收 | 只影响送AI，Gateway照常接收 |
+
+## G0 完成记录（2026-08-06 15:0x）
+
+- 新建 `src/shared/bridge_config.js`：唯一 schema（26 字段，含 `groupAiTimeoutMs` 群聚合 AI 超时）、三级优先级（持久化 config > env > defaults）、int clamp + enum 校验、`LEGACY_MIGRATIONS` 旧字段迁移、`normalizeC2cFixedBindings` 收编。
+- `bridge_auto.js` 删 126 行本地配置堆；`normalizeAutoReplyConfig` 薄代理到 bridge_config；`writeAutoReplyConfigAsync` 直接写回完整 schema；`flushDueGroupBucketsAsync` 废弃桶满提前 flush（超 `groupMaxItems` 只保留最新 N 条 + overflowCount）；`processAutoReplyQueueOnceAsync` 的 `groupAggregateWindowMs=0` 不再被 parsePositiveInt 误伤。
+- 超时判定提前落地：群聚合 AI 调用用 `groupAiTimeoutMs`（120s）+ 单次尝试，超时抛 `group_ai_timeout`；AI 返回后锚点超 4 分钟安全窗口 → `anchor_expired_dropped` 放弃并记录（完整 active_send 点名降级待 G3）。
+- `qqbot_pro_bridge_configure` 扩展 10 个新参数（group_ai_timeout_ms / group_message_mode / group_context_mode / group_context_enabled / group_context_before / group_context_after / group_context_limit / group_max_items / group_global_cache_max_items / group_flush_concurrency），兼容旧 `group_aggregate_max_items`，返回值新增 `changes`。
+- METADATA env 增加 9 个新变量声明；README 环境变量表同步。
+- src/dist 一致、sync.sh 全过（8 JS + 1 Python）、27 项冒烟测试全过。
+- **已烧录**：dev_package 已同步，真实 Operit 已部署。
 
 ## 下一阶段实施入口
 
 按 `V2-BLUEPRINT.md §12` 执行，不应直接先写 UI：
 
-1. **G0 配置 schema 与旧字段迁移**。
-2. **G1 群事件分流、可恢复缓存和双层容量**。
+1. ~~G0 配置 schema 与旧字段迁移~~ ✅ 已完成（bridge_config.js）。
+2. **G1 群事件分流、可恢复缓存和双层容量**（当前入口）。
 3. **G4 统一 Waifu chunker**。
 4. **G2 上下文三态/查询工具**。
 5. **G3 replyTo、引用与时效降级**。
