@@ -48,6 +48,15 @@ Operit 的独立 QQ Bot 桥接包。它把基础 QQ Bot 收发、增强 Gateway�
 | `QQBOT_PRO_TARGET_OPENIDS` | 当前主动 C2C 目标/兼容候选列表 |
 | `QQBOT_PRO_TARGET_GROUP_OPENIDS` | 主动群消息候选 |
 | `QQBOT_PRO_IMAGE_FOLDERS` | 本地图片目录，逗号/换行/分号分隔 |
+| `QQBOT_PRO_GROUP_AGGREGATE_WINDOW_MS` | 群聚合窗口毫秒，默认 60000；0 = 不聚合 |
+| `QQBOT_PRO_GROUP_AI_TIMEOUT_MS` | 群聚合 AI 生成超时毫秒，默认 120000；超时进入降级决策（主动点名 / 放弃并记录） |
+| `QQBOT_PRO_GROUP_MESSAGE_MODE` | 群消息桥接模式：`at_only`（默认）/ `all` |
+| `QQBOT_PRO_GROUP_CONTEXT_ENABLED` | 邻近上下文总开关，默认关闭 |
+| `QQBOT_PRO_GROUP_CONTEXT_MODE` | 上下文三态：`off`（默认）/ `automatic` / `agent_on_demand` |
+| `QQBOT_PRO_GROUP_CONTEXT_LIMIT` | 前后文统一条数，同时作用于 before/after，clamp 0～20 |
+| `QQBOT_PRO_GROUP_MAX_ITEMS` | 单群安全保留上限，默认 30；超过只保留最新，不提前 flush |
+| `QQBOT_PRO_GROUP_GLOBAL_CACHE_MAX_ITEMS` | 全局群缓存最新保留上限，默认 100 |
+| `QQBOT_PRO_GROUP_FLUSH_CONCURRENCY` | 到期群并发 flush 数，默认 3，clamp 1～8 |
 
 ## 官方依据
 
@@ -57,10 +66,12 @@ Operit 的独立 QQ Bot 桥接包。它把基础 QQ Bot 收发、增强 Gateway�
 
 详细设计与状态见 `V2-BLUEPRINT.md`、`STATUS.md`、`HANDOFF.md`。
 
-## 新增规划（2026-08-06 14:32）
+## 新增规划（2026-08-06 14:32）—— G0 已完成
+
+> 状态：**G0 配置模型已落地**（2026-08-06 15:0x，schema/默认值/env 映射/clamp/旧字段迁移见 `src/shared/bridge_config.js`）；G1 事件分流与可恢复缓存尚未实施。
 
 - 群聚合按 `group_openid` 独立计时；Gateway 开启后，该群第一条有效 @Bot 消息到达时开始计时，默认收集 60 秒，窗口结束后一次交给 AI 选择回复内容。
-- 目标群聚合窗口可由 UI、Agent 工具和环境变量修改：`QQBOT_PRO_GROUP_AGGREGATE_WINDOW_MS`，默认 `60000`；当前代码仍是旧窗口，待按 G0/G1 实施。
+- 目标群聚合窗口可由 UI、Agent 工具和环境变量修改：`QQBOT_PRO_GROUP_AGGREGATE_WINDOW_MS`，默认 `60000`；配置层已生效，G1 将把运行逻辑切换到新窗口。
 - 普通群消息继续由 Gateway 原始事件能力接收，但默认不唤醒 AI；新增 `at_only/all` 事件处理策略，默认 `at_only`。
 - 每条 @ 消息可选读取前后文，默认前后各 5 条；上下文开关、数量和最大 20 条限制由 UI/Agent/环境变量控制。该上下文不是默认自动聚合，AI 可在启用后按需使用。
 - 单群安全上限默认 30 条；超过后该群只保留最新 30 条。Gateway 全局队列上限和最新保留数另行配置，最多同时 flush 的群数默认 3，均可调整。
