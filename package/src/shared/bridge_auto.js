@@ -9,6 +9,10 @@ module.exports = {
     qqbot_pro_bridge_start: qqbot_auto_reply_start,
     qqbot_pro_bridge_stop: qqbot_auto_reply_stop,
     qqbot_pro_bridge_run_once: qqbot_auto_reply_run_once,
+    qqbot_pro_bridge_contacts,
+    qqbot_pro_bridge_bind_c2c,
+    qqbot_pro_bridge_set_proactive_target,
+    qqbot_pro_bridge_list_image_folders,
     onQQBotAutoReplyApplicationCreate,
     onQQBotAutoReplyApplicationForeground,
     onQQBotAutoReplyApplicationTerminate
@@ -17,7 +21,7 @@ const WaifuMessageProcessor = Java.com.ai.assistance.operit.util.WaifuMessagePro
 const DEFAULT_ASSISTANT_INSTRUCTION = "";
 const MAX_EVENT_PROCESS_FAIL_COUNT = 3;
 const DEFAULT_AUTO_REPLY_CONFIG = {
-    enabled: false,
+    enabled: true,
     pollIntervalMs: 3000,
     aiTimeoutMs: 180000,
     c2cEnabled: true,
@@ -29,8 +33,10 @@ const DEFAULT_AUTO_REPLY_CONFIG = {
     targetChatId: "",
     waifuFlushSentences: 3,
     groupAggregateWindowMs: 25000,
+    groupWaifuFlushSentences: 5,
+    proactiveC2cOpenId: "",
     groupAggregateMaxItems: 10,
-    groupNicknameEnabled: true,
+    groupNicknameEnabled: false,
     c2cFixedBindings: []
 };
 let autoReplyTimerId = null;
@@ -116,11 +122,24 @@ function normalizeAutoReplyConfig(raw) {
             next.targetChatId = envTarget;
         }
     }
+    if (!next.characterCardId) next.characterCardId = (0, core.readEnv)("QQBOT_PRO_CHARACTER_CARD");
+    const envWaifu = (0, core.readEnv)("QQBOT_PRO_WAIFU_FLUSH");
+    if (envWaifu && !(0, core.hasOwn)(raw, "waifuFlushSentences")) next.waifuFlushSentences = (0, core.parsePositiveInt)(envWaifu, "QQBOT_PRO_WAIFU_FLUSH", 3);
+    if (!(0, core.hasOwn)(raw, "enabled")) {
+        const envAuto = (0, core.readEnv)("QQBOT_PRO_AUTO_REPLY");
+        if (envAuto) next.enabled = (0, core.toBoolean)(envAuto, true);
+    }
     if ((0, core.hasOwn)(raw, "waifuFlushSentences")) {
         next.waifuFlushSentences = (0, core.parsePositiveInt)(raw.waifuFlushSentences, "waifuFlushSentences", DEFAULT_AUTO_REPLY_CONFIG.waifuFlushSentences);
     }
     if ((0, core.hasOwn)(raw, "groupAggregateWindowMs")) {
         next.groupAggregateWindowMs = (0, core.parsePositiveInt)(raw.groupAggregateWindowMs, "groupAggregateWindowMs", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateWindowMs);
+    }
+    if ((0, core.hasOwn)(raw, "groupWaifuFlushSentences")) {
+        next.groupWaifuFlushSentences = (0, core.parsePositiveInt)(raw.groupWaifuFlushSentences, "groupWaifuFlushSentences", 5);
+    }
+    if ((0, core.hasOwn)(raw, "proactiveC2cOpenId")) {
+        next.proactiveC2cOpenId = (0, core.asText)(raw.proactiveC2cOpenId).trim();
     }
     if ((0, core.hasOwn)(raw, "groupAggregateMaxItems")) {
         next.groupAggregateMaxItems = (0, core.parsePositiveInt)(raw.groupAggregateMaxItems, "groupAggregateMaxItems", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateMaxItems);
@@ -156,6 +175,8 @@ async function writeAutoReplyConfigAsync(config) {
             targetChatId: normalized.targetChatId,
             waifuFlushSentences: normalized.waifuFlushSentences,
             groupAggregateWindowMs: normalized.groupAggregateWindowMs,
+            groupWaifuFlushSentences: normalized.groupWaifuFlushSentences,
+            proactiveC2cOpenId: normalized.proactiveC2cOpenId,
             groupAggregateMaxItems: normalized.groupAggregateMaxItems,
             groupNicknameEnabled: normalized.groupNicknameEnabled,
             c2cFixedBindings: normalizeC2cFixedBindings(normalized.c2cFixedBindings)
@@ -221,7 +242,7 @@ async function writeAutoReplyRecordsAsync(records) {
 function trimRecordMap(records) {
     const items = Object.keys(records).map((key) => {
         const value = records[key];
-        const updatedAt = Number(value?.updatedAt ?? 0);
+        const updatedAt = Date.parse(value?.updatedAt ?? "") || 0;
         return { key, value, updatedAt };
     });
     items.sort((left, right) => right.updatedAt - left.updatedAt);
@@ -838,6 +859,31 @@ function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregated
     const attachmentId = `GROUP_AGGREGATE:${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`;
     return `<attachment id="${escapeXml(attachmentId)}" filename="qq_group_aggregate_context.txt" type="text/plain" size="${content.length}">${escapeXml(content)}</attachment>`;
 }
+function splitReplyBySentenceCount(text, sentenceCount, maxLength = 400) {
+    const result = [];
+    let buffer = "";
+    let count = 0;
+    const limit = Math.max(Number(sentenceCount) || 1, 1);
+    for (const ch of (0, core.asText)(text)) {
+        buffer += ch;
+        if (/[。！？]/.test(ch)) count += 1;
+        if (count >= limit || buffer.length >= maxLength) {
+            if (buffer.trim()) result.push(buffer.trim());
+            buffer = "";
+            count = 0;
+        }
+    }
+    if (buffer.trim()) result.push(buffer.trim());
+    return result;
+}
+async function sendReplyChunksToQQAsync(event, text, sentenceCount) {
+    const chunks = splitReplyBySentenceCount(text, sentenceCount);
+    let last = null;
+    for (let index = 0; index < chunks.length; index += 1) {
+        last = await sendReplyToQQAsync(event, chunks[index], index + 1);
+    }
+    return { last, chunkCount: chunks.length };
+}
 async function flushGroupBucketAsync(config, groupOpenId, bucket) {
     const events = bucket.events;
     const snapshot = await (0, state.requireConfiguredSnapshotAsync)();
@@ -857,7 +903,7 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
     const userMessage = [aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
     const generated = await generateAiReplyAsync(config, aggregateEvent, aggregateEventKey, undefined, { userMessage });
     const aiResponse = (0, core.asText)(generated.aiResponse).trim();
-    await sendReplyToQQAsync(lastEvent, aiResponse, 1);
+    await sendReplyChunksToQQAsync(lastEvent, aiResponse, config.groupWaifuFlushSentences || 5);
     const eventKeys = [];
     for (let index = 0; index < events.length; index += 1) {
         const eventKey = buildEventKey(events[index]);
@@ -979,7 +1025,7 @@ async function processSingleEventAsync(config, event) {
     let streamSendQueue = Promise.resolve();
     let pendingBuffer = "";
     let pendingSentenceCount = 0;
-    const SENTENCE_END_REGEX = /[。！？!?…\n]/g;
+    const SENTENCE_END_REGEX = /[。！？]/g;
     const flushPendingBuffer = (eventRef, isFinal) => {
         const text = pendingBuffer.trim();
         pendingBuffer = "";
@@ -1220,6 +1266,7 @@ async function stopAutoReplyLoopInternal(reason, errorText = "") {
         clearInterval(autoReplyTimerId);
         autoReplyTimerId = null;
     }
+    groupPendingBuckets.clear();
     return await updateAutoReplyRuntimeAsync({
         running: false,
         status: reason === "manual_stop" ? "stopped" : "error",
@@ -1349,6 +1396,12 @@ async function qqbot_auto_reply_configure(params = {}) {
         if ((0, core.hasOwn)(params, "group_aggregate_window_ms")) {
             patch.groupAggregateWindowMs = (0, core.parsePositiveInt)(params.group_aggregate_window_ms, "group_aggregate_window_ms", before.groupAggregateWindowMs);
         }
+        if ((0, core.hasOwn)(params, "group_waifu_flush_sentences")) {
+            patch.groupWaifuFlushSentences = (0, core.parsePositiveInt)(params.group_waifu_flush_sentences, "group_waifu_flush_sentences", before.groupWaifuFlushSentences);
+        }
+        if ((0, core.hasOwn)(params, "proactive_c2c_openid")) {
+            patch.proactiveC2cOpenId = (0, core.asText)(params.proactive_c2c_openid).trim();
+        }
         if ((0, core.hasOwn)(params, "group_aggregate_max_items")) {
             patch.groupAggregateMaxItems = (0, core.parsePositiveInt)(params.group_aggregate_max_items, "group_aggregate_max_items", before.groupAggregateMaxItems);
         }
@@ -1453,6 +1506,54 @@ async function qqbot_auto_reply_run_once() {
         };
     }
 }
+
+async function qqbot_pro_bridge_contacts() {
+    const bindings = await readAutoReplyBindingsAsync();
+    const items = Object.keys(bindings)
+        .filter((key) => key.startsWith("c2c:"))
+        .map((key) => ({
+            openid: key.slice(4),
+            chatId: bindings[key]?.chatId ?? "",
+            title: bindings[key]?.title ?? "",
+            lastProcessedAt: bindings[key]?.lastProcessedAt ?? ""
+        }));
+    return { success: true, contacts: items };
+}
+
+async function qqbot_pro_bridge_bind_c2c(params = {}) {
+    const openid = (0, core.asText)(params.openid).trim();
+    const chatId = (0, core.asText)(params.target_chat_id ?? params.chat_id).trim();
+    if (!openid || !chatId) {
+        throw new Error("openid and target_chat_id are required");
+    }
+    const config = await readAutoReplyConfigAsync();
+    const fixed = normalizeC2cFixedBindings(config.c2cFixedBindings)
+        .filter((item) => item.openid !== openid);
+    const binding = {
+        openid,
+        chatId,
+        title: (0, core.asText)(params.title).trim()
+    };
+    fixed.push(binding);
+    await writeAutoReplyConfigAsync({ ...config, c2cFixedBindings: fixed });
+    return { success: true, binding };
+}
+
+async function qqbot_pro_bridge_set_proactive_target(params = {}) {
+    const openid = (0, core.asText)(params.openid).trim();
+    const config = await updateAutoReplyConfigAsync({ proactiveC2cOpenId: openid });
+    await (0, state.writeEnv)("QQBOT_PRO_TARGET_OPENIDS", openid);
+    return { success: true, proactiveC2cOpenId: config.proactiveC2cOpenId };
+}
+
+async function qqbot_pro_bridge_list_image_folders() {
+    return {
+        success: true,
+        folders: (0, core.readImageFolders)(),
+        env: "QQBOT_PRO_IMAGE_FOLDERS"
+    };
+}
+
 async function onQQBotAutoReplyApplicationCreate() {
     try {
         const snapshot = await (0, state.readConfigSnapshotAsync)();
@@ -1505,3 +1606,7 @@ async function onQQBotAutoReplyApplicationTerminate() {
         };
     }
 }
+exports.qqbot_pro_bridge_contacts = qqbot_pro_bridge_contacts;
+exports.qqbot_pro_bridge_bind_c2c = qqbot_pro_bridge_bind_c2c;
+exports.qqbot_pro_bridge_set_proactive_target = qqbot_pro_bridge_set_proactive_target;
+exports.qqbot_pro_bridge_list_image_folders = qqbot_pro_bridge_list_image_folders;
