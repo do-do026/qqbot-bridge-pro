@@ -1,6 +1,6 @@
 # qqbot-bridge-pro 冷启动接续文档
 
-> 更新时间：2026-08-06 11:55。新窗口先读 `V2-BLUEPRINT.md`，再读 `STATUS.md`。
+> 更新时间：2026-08-06 14:47。新窗口先读 `V2-BLUEPRINT.md` §12，再读 `STATUS.md`；从 Epic G0 开始实施。
 
 ## 1. 项目
 
@@ -57,17 +57,44 @@ Operit 指南：
 - 因而绑定、配置、主动发送和图片目录均可实现。
 - 当前 compose_dsl ToolPkg UI 加载问题属于宿主限制，插件不能自行修复。
 
-## 5. 下一步
+## 5. 14:32 新架构决定
 
-1. 审核本轮源码差异，尤其 `bridge_auto.js` 新 API 和群 5 句分段。
-2. 重构 `src/ui/qqbot_settings/index.ui.js`，删除 G3 和旧 `target_chat_id` 文案；若宿主仍阻塞，保持不注册并如实记录。
-3. 补图片目录浏览/筛选工具。
-4. 运行 `bash scripts/sync.sh`；注意脚本当前假设 `package/test` 存在，若不存在需先修 sync.sh。
-5. 安装/烧录后新开会话确认新增工具可见。
-6. 做 STATUS 所列 C2C/群/主动发送/图片/Gateway 验收。
-7. 验证后才更新“已部署/已验证”状态并推 GitHub。
+以下均已进入规划，**尚未写入运行代码**：
 
-## 6. 已知技术坑
+- 每群第一条有效 @Bot 消息起算独立窗口，默认 60000ms；UI/API/env 可改。
+- Gateway 照常接收普通群消息，桥接默认只让 @Bot 触发 AI。
+- 普通群消息可作为邻近上下文：off/automatic/agent_on_demand 三态，默认 off；前5/后5，单次最多20。
+- 单群超过可配置安全上限后只保留最新项，默认30；全局缓存默认建议100；到期群并发默认3。
+- @ 消息编号，AI 返回 `replyTo`；过期后根据 `fallbackPreference` 主动群发或放弃并记录。
+- Waifu 增加归一化后的非空换行计数。
+- `com.operit.message_insert_bundle` 已确认用 `before_process` 与 `before_send_to_model` 双阶段 Hook 实现可选落盘；QQ 后台 Chat 调用是否触发 Finalize Hook 待探针验证。
+- C2C/group 开关只控制是否送 AI，Gateway 不动态取消订阅。
+
+字段、默认值、迁移、Epic 和技术债以 `V2-BLUEPRINT.md §12` 为准。
+
+## 6. 下一步实施顺序
+
+1. **G0 配置 schema/迁移**：先统一 config/env/UI/API 优先级，废弃旧满桶提前 flush 语义。
+2. **G1 事件分流/缓存**：@ 触发、普通群消息仅缓存、每群 firstAt、单群/全局容量、重启恢复。
+3. **G4 统一 chunker**：`。！？\n`、连续换行归一化、400字符兜底。
+4. **G2 上下文工具**：三态、前后5、最大20。
+5. **G3 replyTo/引用/过期降级**。
+6. **G5 Prompt Finalize Hook 探针**，验证成功后再实现不落盘桥接 Prompt。
+7. 可靠性 Sprint：事务幂等、token缓存、错误码/Trace ID、故障注入。
+8. **最后做 G6 UI**，禁止在旧 UI 上继续补丁堆叠。
+9. 每个 Epic 完成后更新 STATUS 的代码/部署/验证三态；全部实测后再发布。
+
+## 7. 实施约束
+
+- 现在的 src/dist 保持上一轮已安装代码；14:32 新需求只写入文档，没有暴露未实现工具参数。
+- 不要从 README 摘要直接编码；先读 BLUEPRINT §12 的边界和迁移要求。
+- UI 与 Agent 必须调用统一配置服务，不能直接写 config.json。
+- “后5条”在窗口结束时取；不能在 @ 到达瞬间假装已经存在。
+- Prompt Hook 必须用 chatId/turn token 白名单隔离，防止注入普通 Operit 对话。
+- 真正 QQ 原生 @、引用样式和主动群消息降级必须实机验证，未验证不写成已支持。
+- sync.sh 的 optional test 目录问题已经修复；每次改源码后同步 src/dist 并跑语法检查。
+
+## 8. 已知技术坑
 
 - ToolPkg 新工具烧录后旧会话通常不可见，要新开会话。
 - `readResource` 偶发失败；部署 Gateway 脚本时应校验资源版本/哈希。
@@ -76,7 +103,7 @@ Operit 指南：
 - QQ 相同 msg_id 可能重复推送，Gateway eventKey 去重已存在，但发送成功后移除队列失败仍需事务级幂等。
 - GitHub smart HTTP 被墙，使用 REST contents API。
 
-## 7. 文件地图
+## 9. 文件地图
 
 ```text
 /sdcard/Download/qqbot-bridge-pro/
