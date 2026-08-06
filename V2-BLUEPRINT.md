@@ -43,7 +43,7 @@ Operit 当前的限制：此宿主版本对 ToolPkg compose_dsl UI 的热烧录/
 ### 3.1 C2C
 
 1. openid 只在该用户实际给 Bot 发消息后进入已知联系人状态。
-2. 不把所有 openid 自动注入 AI 上下文；AI 需要时调用联系人工具。
+2. 不把所有 openid 自动注入 AI 上下文；AI 需要时调用联系人工具。默认仅返回后四位，明确绑定或发送时才允许揭示完整 openid。
 3. 指定 openid 可通过 UI/API 绑定指定 Operit `target_chat_id`。
 4. 未绑定 openid 自动按 `c2c:{openid}` 创建/复用独立对话。
 5. 全局 `target_chat_id` 在 C2C 场景退役；固定私聊使用 `c2c_fixed_bindings`。
