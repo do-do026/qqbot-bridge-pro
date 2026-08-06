@@ -1,115 +1,95 @@
-# qqbot-bridge-pro 冷启动接续文档（HANDOFF）
+# qqbot-bridge-pro 冷启动接续文档
 
-> 用途：新窗口 AI 接续本工程的唯一入口。读完本文件 + 两份配套文档即可独立工作。
-> 更新时间：2026-08-06 04:50｜状态：M0 ✅，M1 ✅ 已验证，M2 主动发送 ✅，M4 生命周期 ✅ 部分，**04:05 三连修复（nohup/探活/ws）+ 04:18 B1 去重/空回复重试 + 04:50 蓝图重构（S1-S6）**
+> 更新时间：2026-08-06 11:55。新窗口先读 `V2-BLUEPRINT.md`，再读 `STATUS.md`。
 
----
+## 1. 项目
 
-## 0. 三十秒速览
+- 仓库：`https://github.com/do-do026/qqbot-bridge-pro`
+- ToolPkg：`com.operit.qqbot_bridge_pro`
+- 真相源：`/sdcard/Download/qqbot-bridge-pro/package/`
+- dev_package：`/sdcard/Download/Operit/dev_package/qqbot_bridge_pro/`
+- Gateway：增强版 Python，端口 32146；同 AppID 下原包必须停用。
+- 推送：GitHub REST API；不要 git push。凭证见记忆库精确标题「凭证/完整凭证与密钥（2026-07-20更新）」。
 
-**项目**：`qqbot-bridge-pro` —— Operit 的 QQ Bot 桥接增强包（独立 ToolPkg，**不修改原包** `com.operit.qqbot_bundle`）。把原包全部能力 + qqbot-pro 增强能力合并成一个包，可顶替原包。
+## 2. 当前真实状态
 
-**仓库**：`https://github.com/do-do026/qqbot-bridge-pro`（公开，REST API 上传，勿用 git push——smart HTTP 被墙）。GitHub Token 见记忆库「凭证/完整凭证与密钥」条目（2026-07-20 更新），勿写入仓库文件（secret scanning 会拦截）。
+核心 QQ→Gateway→Operit Chat→AI→QQ 已验证。2026-08-06 11:30 后按新产品要求重构：
 
-**进度**：`com.operit.qqbot_bridge_pro` v1.0.0 已烧录并激活（18 工具）。**全链路已跑通**（2026-08-06 02:16 起）：QQ → Gateway(32146) → 绑定对话 166abbb7… → AI 回复 → 回 QQ；回复同时落盘 Operit 对话。AI 主动发送已实测（直接 OpenAPI POST 送达）。
+- C2C 固定绑定 API、按需联系人查询 API、唯一主动目标 API 已加入源码。
+- 未绑定 C2C 按 openid 分对话；`target_chat_id` 仅群聊固定目标。
+- 群昵称默认关闭，使用 openid 后四位。
+- 单聊 3 句、群 5 句，只统计 `。！？`。
+- 普通文本 send 已接候选目标兜底。
+- 角色卡/Waifu/自动回复 env 已补实际读取。
+- ISO 时间排序、停止后群桶残留、manifest 流式误述已修。
+- src/dist 已同步且 JS/Python 语法检查通过。
 
-**必须读**：
-1. `V2-BLUEPRINT.md` —— 架构、ADR、里程碑、任务拆分、环境变量、**§10 接续指引**、**§11 群聊增强新需求（G1-G3）**
-2. `STATUS.md` —— 已完成/待验证/已知问题（6 项，含 B1 消息去重）/技术债/Backlog/下次行动
+尚未完成/验证：
 
----
+- 完整 UI；旧 UI 源码内容过时且注册仍被注释。
+- 图片目录专用浏览工具。
+- 新版本安装烧录和真实场景验收。
+- token 缓存、事务级幂等、错误码映射。
 
-## 1. 核心链路（已验证 ✅）
+## 3. 产品铁律
 
-```
-QQ 发消息 → 增强 Gateway(32146) 收 → 事件队列
-         → 自动回复桥 → Tools.Chat 唤醒 Operit AI（绑定指定对话 target_chat_id）
-         → AI 回复 → waifu 三句号切分（waifu_flush_sentences=3）→ 发回 QQ
-工作流/AI 主动 → list_targets 查候选 → send/send_image 主动发 QQ   ✅ 实测通过
-流式预留（未实现）→ /v2/users/{openid}/stream_messages 三态（M3）
-```
+1. 联系人 openid 只在其实际发消息后记录；不自动把全部联系人注入 AI。
+2. C2C 固定绑定用 `c2c_fixed_bindings` / `qqbot_pro_bridge_bind_c2c`。
+3. C2C 不追求 QQ 昵称；默认后四位。用户称呼由对话/记忆决定。
+4. 群聊按 group_openid 复用并聚合；不做群友独立对话。
+5. 主动发送主路径只绑定一个 C2C openid。
+6. 自动回复默认开启，但 Gateway 与自动回复可分开控制；关闭监听需停两者。
+7. 官方 stream_messages 产品上放弃，只留架构位置。
+8. 插件描述只写已实现和可实现未完成，不把预留写成已支持。
 
-## 2. 踩坑记录（新窗口必看）
+## 4. 官方查证摘要
 
-1. **新工具当前会话不可见**：`debug_install_toolpkg` 烧录后必须**新开会话**才能看到 `qqbot_bridge_pro_*` 工具。且注意 `reset_subpackage_states=true` 会重置子包启用状态（工具数 0），需用 `activate_subpackages` 显式激活。
-2. **git push 被墙**：用 Python + REST API（base64 → PUT /contents/{path}），更新已有文件先 GET 拿 sha。
-3. **同 AppID 双 Gateway 互踢**：原包已停 ✅；新包 Gateway 端口 32146。
-4. **腾讯网关必须带 `Accept: application/json` 头**：不带返回 `{"code":100007,"message":"appid invalid"}`，误导性极强。
-5. **`listenerEnabled` 无代码置 true**：gateway.js 不写，bridge 只在 false 时把 enabled 打回 false——首次配置必须手工写 config.json。
-6. **消息重复到达**（P1 已知问题）：同一 messageId 多次处理（对话出现重复条目 + 偶发 AI 空回复）。修复方向：Gateway 入队按 eventKey 去重 + 桥处理幂等（B1）。
-7. **状态目录隔离**：新包用 `getPluginConfigDir(com.operit.qqbot_bridge_pro)`（=/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro），与原包物理隔离。
-8. **真相源**：`/sdcard/Download/qqbot-bridge-pro/package/`，dev_package 由 `scripts/sync.sh` 覆盖，别直接改 dev_package。
-9. **软链接不可行**（实测）：Android /sdcard（FUSE）不允许 `ln -s`（Permission denied），不要试图用软链统一 dev_package 与主目录；双副本漂移靠 sync.sh 单向同步解决（qqbot-pro 已验证此方案）。
+QQ 官方：
 
-## 3. 下一步（新会话照此执行）
+- C2C/群收发、主动/被动消息、富媒体上传、官方 C2C 流式均存在。
+- openid 是 AppID/关系维度身份，不是 QQ 号。
+- 主动消息受用户开关、权限、频控约束。
+- C2C 无适合本需求的稳定通用昵称接口。
 
-> ✅ **2026-08-06 04:05 状态快照（三连修复完成）**：
-> - **修复① 缺 nohup**（移植回归）：gateway 启动命令补上 `nohup`（src+dist 的 qqbot_pro_gateway_start / ensureGatewayStarted 两处）。实测进程 PPID=1，已脱离 Operit 进程树，Operit 重启杀不掉，与原包 gateway 同等存活能力。
-> - **修复② 探活抛异常**（httpToControl 未捕获 Tools.Net.http 连接失败）：导致 isServiceRunning() 直接抛异常 → ensureGatewayStarted 永远中断在"判断是否运行"，进程永远起不来 + gateway/bridge start 全部 Step error。已加 try-catch，连接失败返回"未运行"→正常走启动分支。
-> - **修复③ ws 握手超时 + 缺 Accept 头**（qqbot_pro_gateway.py SimpleWebSocketClient）：默认 1s socket 超时导致握手阶段 read timeout；握手头缺 `Accept: application/json`。已改为握手阶段宽超时（10s）+ 补 Accept 头 + 握手完成后切回轮询超时。
-> - **当前实况（04:05 实测）**：Gateway running=true connected=true，botUsername=渡渡！♡，pid 29543，PPID=1；Bridge running=true status=idle（3s 轮询中），target_chat_id=166abbb7… 绑定保留。
-> - **2026-08-06 04:18 加固（B1 去重 + 空回复重试）**：① gateway.py append_event 增加 eventKey 去重（同一条消息 ws 重推不再重复入队，实测"走走"此前被处理 3 次）；② bridge_auto.js generateAiReplyAsync 增加空回复自动重试（最多 3 次，5s/10s 间隔），AI 偶发空回复自愈，不再落盘空条目干等。两者已烧录并重启验证（Gateway connected + Bridge idle）。
-> - **待办验证**：① 重启 Operit 验证 gateway 存活（预期存活）② QQ 发消息验证全链路 ③ 群聊/图片/主动发送补测。
-> - **注意**：部署脚本位于 `/sdcard/Download/Operit/plugins/com.operit.qqbot_bridge_pro/qqbot_pro_gateway.py`，改 resource 后需手动覆盖（start 只在脚本不存在时复制）；`readResource` 在当前会话曾失败，已用 cp 解决。
-> - **2026-08-06 04:50 蓝图重构（第十二节，初尘 04:39 决策）**：
->   - **昵称查证**：群聊可带昵称（`GET /v2/groups/{gid}/members/{mid}` → username）；**C2C 官方无用户资料接口，私聊带不了昵称**（用户管理模块为空）。
->   - **G1+G2 合并为 S2 群聚合引擎**（P0）：聚合窗口默认 25s/10 条（可配）+ 群昵称尽力而为（失败降级 openid 尾号）+ AI 自行选择条目回复 + 整批 remove。
->   - **G3 放弃**（不记群友是谁）。
->   - **新增 S3 C2C 分人对话**（P1）：c2cFixedBindings（已知 openid 绑指定对话，UI 管）+ 未绑定自动按 c2c:openid 新建独立对话；**target_chat_id 在 C2C 场景退役**（群聊保留）。
->   - **S1 B1 收尾**（P0，群聚合前置）：失败计数/移除策略。**S4 流式**只留 W1.1 基础函数（P2）。**S5 UI** 一揽子最后打包（含 c2cFixedBindings 管理）。**S6** T14 验证 + T15 推送殿后。
->   - 详见 V2-BLUEPRINT.md §6 里程碑重构 + §11。
+Operit 指南：
 
-1. 新会话验证工具可见 → `qqbot_pro_bridge_status` / `qqbot_pro_gateway_status`
-2. **接管**：`qqbot_pro_gateway_start` → `qqbot_pro_bridge_start` → 全链路验证
-3. **S1 B1 收尾**（P0）：bridge 失败计数/移除策略（原包保持停用，防双包）
-4. **S2 群聚合引擎**（P0，初尘需求，见 BLUEPRINT §11 S2）：聚合窗口 + 群昵称尽力而为 + AI 选择性回复
-5. **S3 C2C 分人对话**（P1）：c2cFixedBindings + 未绑定自动分人；target_chat_id 在 C2C 退役
-6. **S4 流式预留**（P2）：core.js 只加 sendStreamMessage（W1.1）
-7. **S5 UI 一揽子**（P2，最后）：设置页含 c2cFixedBindings 管理，走外部 packages 导入链路（绕开 container 检查宿主 bug）
-8. **S6**：T14 顶替原包验证 + T15 GitHub 推送
+- 支持 METADATA tools/env、环境变量写入、HTTP、Files、Java Bridge、生命周期 Hook、Chat 和 ToolPkg UI。
+- 因而绑定、配置、主动发送和图片目录均可实现。
+- 当前 compose_dsl ToolPkg UI 加载问题属于宿主限制，插件不能自行修复。
 
-## 4. 文件地图
+## 5. 下一步
 
-```
+1. 审核本轮源码差异，尤其 `bridge_auto.js` 新 API 和群 5 句分段。
+2. 重构 `src/ui/qqbot_settings/index.ui.js`，删除 G3 和旧 `target_chat_id` 文案；若宿主仍阻塞，保持不注册并如实记录。
+3. 补图片目录浏览/筛选工具。
+4. 运行 `bash scripts/sync.sh`；注意脚本当前假设 `package/test` 存在，若不存在需先修 sync.sh。
+5. 安装/烧录后新开会话确认新增工具可见。
+6. 做 STATUS 所列 C2C/群/主动发送/图片/Gateway 验收。
+7. 验证后才更新“已部署/已验证”状态并推 GitHub。
+
+## 6. 已知技术坑
+
+- ToolPkg 新工具烧录后旧会话通常不可见，要新开会话。
+- `readResource` 偶发失败；部署 Gateway 脚本时应校验资源版本/哈希。
+- `/sdcard` 不支持软链接，主目录→dev_package 只能单向同步。
+- Gateway 使用 nohup；探活 HTTP 必须捕获连接失败；腾讯 WS/HTTP 需正确 Accept 头。
+- QQ 相同 msg_id 可能重复推送，Gateway eventKey 去重已存在，但发送成功后移除队列失败仍需事务级幂等。
+- GitHub smart HTTP 被墙，使用 REST contents API。
+
+## 7. 文件地图
+
+```text
 /sdcard/Download/qqbot-bridge-pro/
-├── README.md          ← 仓库门面
-├── V2-BLUEPRINT.md    ← 架构/任务/接续指引/群聊增强设计（主文档）
-├── STATUS.md          ← 状态快照（Sprint Review + Backlog + 技术债）
-├── HANDOFF.md         ← 本文件
-├── package/           ← 包源码（真相源）
-│   ├── manifest.json  ← toolpkg_id: com.operit.qqbot_bridge_pro
-│   ├── resources/qqbot_pro_gateway.py  ← 增强版 Gateway（端口 32146）
-│   ├── src/main.js / shared/ / packages/ / ui/
-│   └── dist/          ← 与 src 手动同步（手写 JS 无编译）
-└── scripts/sync.sh    ← 同步 dev_package + 语法检查
+├── README.md
+├── V2-BLUEPRINT.md
+├── STATUS.md
+├── HANDOFF.md
+├── package/
+│   ├── manifest.json
+│   ├── resources/qqbot_pro_gateway.py
+│   ├── src/
+│   └── dist/
+└── scripts/sync.sh
 ```
 
-## 5. 手动打包 .toolpkg SOP（手机全流程，无需电脑）
-
-> 背景：`debug_install_toolpkg`（热烧录）对含 compose_dsl UI 的包会报 `container did not appear`（宿主 bug，2026-08-06 04:20 二次复现）。
-> 替代路径：手动打包 `.toolpkg` 放入外部 packages 目录，走**正常导入扫描链路**（phase=external），可能绕过热烧录的 container 检查。待验证。
-
-```bash
-# ① 准备：打开 main.js（src+dist）的 UI 注册注释 → bash scripts/sync.sh
-# ② 让 dist/ui 用真正的设置页（src 616 行版），清掉测试屏和嵌套残留
-cd /sdcard/Download/Operit/dev_package/qqbot_bridge_pro
-cp src/ui/qqbot_settings/index.ui.js dist/ui/qqbot_settings/index.ui.js
-rm -rf dist/ui/ui
-# ③ 打成 zip → .toolpkg
-rm -f /sdcard/Download/qqbot_bridge_pro_ui.toolpkg
-zip -r /sdcard/Download/qqbot_bridge_pro_ui.toolpkg manifest.json src dist resources
-# ④ 导入：放入 Operit 外部 packages 目录（同名覆盖 = 升级/回滚）
-cp /sdcard/Download/qqbot_bridge_pro_ui.toolpkg /sdcard/Android/data/com.ai.assistance.operit/files/packages/
-# ⑤ 验证：包管理界面看包是否在、工具是否可见、工具箱是否有设置页
-#    回滚：把 packages 目录里的 .toolpkg 换回无 UI 版（重新 debug_install_toolpkg 即可）
-```
-
-**注意事项**：
-- `.toolpkg` = zip，根目录直接是 manifest.json / src / dist / resources（无外层文件夹）
-- 打包前必须确认 main.js 的 UI 注册是打开状态，否则打了也白打
-- 导入路径走的是 Operit 外部包扫描（scan candidate phase=external），与热烧录不同链路
-- 若导入后工具消失 → 立即用 `debug_install_toolpkg`（无 UI 版）回滚恢复
-
----
-
-*本文件由渡渡维护。每次迭代结束必须同步更新（STATUS.md + V2-BLUEPRINT.md + GitHub）。*
+每次迭代必须同步 README、BLUEPRINT、STATUS、HANDOFF、manifest、METADATA、src 和 dist。
