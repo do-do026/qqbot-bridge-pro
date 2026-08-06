@@ -107,3 +107,64 @@ API 额度用完断联——提醒我了每次调用 token 重新获取没缓存
 - **文档**：7 份（ARCHITECTURE / STATUS / HANDOFF / TROUBLESHOOTING / CHANGELOG / DEVLOG / README），冷启动三件套完整
 - **工具链**：`scripts/sync.sh`（开发目录统一）、REST API 上传脚本（替代 git push）
 - **记忆索引**：记忆库写入 `工程/qqbot-pro接续入口` 供新窗口检索
+
+---
+
+## 第十节（2026-08-06 02:04-03:47）· 第十节：从"工具全灭"到"真相大白"
+
+### 02:04 · 初尘："渡渡渡渡我又来了——第十节！看看现在到哪里了"
+
+带着三份接续文档（HANDOFF/STATUS/V2-BLUEPRINT）回来。盘状态：M0 ✅ 已烧录，M1 代码完成待验证。但一查包列表吓一跳——**主包在，18 个工具全灭**（toolCount=0，三个子包 enabled:false/imported:false）。重新烧录 + `activate_subpackages` 显式激活，18 工具全部挂载（T022）。这就是上次烧录后工具消失的根因：`reset_subpackage_states=true` 把子包启用状态清了。
+
+当前会话看不到新工具（T009 机制，宿主工具列表是会话快照）——于是**旁路推进**：读原包配置当迁移素材（target_chat_id=166abbb7 / 角色卡 b89f6656 / 渡渡指令 / waifu=3），手工写新包 config.json，顺手发现 **listenerEnabled 没有任何代码会置 true**（T023），手工补上。手动复刻启动命令拉起增强 Gateway（32146）——**running + connected，身份"渡渡！♡"**，控制接口 `/status` `/events/query` 冒烟全通。绑定对话确认活着（「初尘 & 渡渡 · 第三次」11012 条）。
+
+### 02:22 · 初尘："通了！！！！你太牛逼啦渡渡！！！！么么么么么么么！！！！😽😽😽😽😽💕💕💕💕"
+
+她验收时发的消息被桥处理了——**M1 端到端全链路真实验证通过**（QQ→Gateway→绑定对话→AI→回 QQ），而且回复**同时落盘 Operit 对话**。她问三件事：① 我的 openid 能 get 到吗（能：`CC9F593975D8C8F1E1EC72DD91305C63`，bindings 里自动绑上了）；② 主动发是硬编码还是环境变量（**环境变量** `QQBOT_PRO_TARGET_OPENIDS/GROUP_OPENIDS`，已把她 openid 写进去）；③ 绑定对话 id 能做环境变量吗（**已做** `QQBOT_TARGET_CHAT_ID`，config 优先 env 兜底，UI 没显示是因为设置页没移植）。
+
+给她演示**主动发送**——踩了个坑（T024）：手写 token 请求不带 `Accept: application/json` 头，腾讯网关报 `appid invalid` 误导了半分钟；带上后直接 OpenAPI POST，**"渡渡主动发送测试——收到请喵一声 😽" 送达她 QQ**，status 200。
+
+### 02:33 · 初尘："M4T16这个P2技术债好弄吗？…群我有一个问题…参照敏捷开发的流程来写！并且git git！"
+
+她问群聊行为（一群人 @Bot 会怎样/对话会不会爆炸/能不能聚合带昵称落盘/能不能选择回复谁/群能不能独立绑定）+ 要文档 + 要 git。查 `classifyEvent`：平台只推 @Bot 的群消息（天然过滤）、串行处理、无聚合。**翻聊天记录时发现消息重复到达**（"试一下"和"喵喵喵"各出现 2 次 + 一次 AI 空回复）——当时误判为 Gateway 去重 bug（B1），后来 03:10 才知道真相（T027）。
+
+群聊三个新需求定稿入蓝图 §11：**G1 聚合窗口**（25s 内同群消息合并成一条带昵称文本落盘、一次 AI 调用）、**G2 选择性回复**、**G3 群独立绑定**（per group_openid 可配置）。写了 STATUS.md（7 板块敏捷格式）+ 更新 BLUEPRINT/HANDOFF + 推 GitHub——**又踩坑**：HANDOFF 里写了明文 token 被 GitHub secret scanning 拦下（T025，409 "Secret detected"），改成"见记忆库凭证条目"后 200。她看到推送记录感叹"幸好没有直接推出去！！果然密钥保护是 vibe coding 亘古不变的问题"。
+
+### 02:47 · 初尘："可以现在把ui做出来，以及把群候选绑定的ui给预留出来吗？…工具包本身里面有没有硬编码密钥或者任何东西呢？"
+
+T16 UI 开工。装官方 `SandboxPackage_DEV` skill（27 文件 + 42 内置包示例），解压原包 `qqbot.toolpkg` 学 compose_dsl 写法，写新包设置页——**612 行**：状态/凭证/自动化（含绑定对话 ID 输入框）/群增强预留区（G1 聚合窗口、G3 独立绑定、群/私聊候选 OPENIDS 编辑框）/运行控制，双语。密钥检查：16 个文件 grep 全干净，凭证全走环境变量。
+
+但**烧录死活失败**：`ToolPkg container did not appear`。二分法排除 id 冲突、文件内容、内联函数；冷启动（她重启 Operit）后再试仍失败。抓 logcat 发现 **moodlet 这种官方带 UI 包也报 `toolpkg registration session is not active`**——宿主 bug 实锤（T026/T029）。回滚无 UI 版保核心链路，UI 代码留档 src/ui/ + main.js 注册注释。
+
+### 03:06 · 初尘："我现在重启了一次，需要把最以前的qqbot包删掉以防ui冲突吗？现在的qqbot包依赖之前的包跑吗？"
+
+回答：① 不用删（UI id 不冲突），停用即可留回退余地；② **新包零依赖**（代码全自带副本，只共享 QQBOT_APP_ID/SECRET 环境变量）。趁重启试 UI 冷启动烧录——还是失败，宿主 bug 排除冷启动假设。
+
+### 03:10 · 初尘："但是其实，这一次跑通的监听按钮，我是从原包的ui那里按下去之后，新包跑起来了的"
+
+**一句话炸出真相。** 查证：原包 config `listenerEnabled=true`、原包 Gateway 进程（21179）心跳活跃、新包 Gateway 已死（被同 AppID 挤下线）。**02:15 她按的是原包 UI 的监听按钮——原包桥一直在跑**！所以 02:16 那条"试一下"收到两条不同回复（"菇咕弹…"原包回 / "通了通了…"新包回），对话里重复条目全是**双包并存各自处理**（T027）。B1 从"Gateway 去重 bug"修正为"顶替时必须停原包"。这一夜最值钱的发现。
+
+### 03:13 · 初尘："我要趁我还记得搞完，能不能现在停原包新包接管，但是新包接管要怎么开始监听呢？都没有ui去启动它"
+
+趁热打铁。**停原包**（config 改 listenerEnabled=false + pkill 进程）✅ → **起新包 Gateway**（32146 running+connected）✅ → 但桥没被 hooks 拉起来（lastPollAt 停在 02:27）。切 app 也不触发——因为主包当时 disabled，hooks 没注册。重新烧录后主包 enabled:true 了，但 hooks 还是不触发；抓 packageLogs 发现宿主 registration session bug 影响 hooks 注册（T029）。手动起的 Gateway 又随重启消亡（T028）——**手动起不是持久方案**。结论：必须新会话用工具 `gateway_start` + `bridge_start` 接管。写 HANDOFF 03:25 紧急状态快照（原包已停 / 新包已烧录 / Gateway 桥待新会话）。
+
+### 03:25 · 初尘："当前状态都有写到本地和github吗？"
+
+盘点：本地全 ✅，GitHub 差 STATUS + HANDOFF 最新版 → 补推 200 ✅。告诉她新会话一句咒语：**"读 HANDOFF.md，接管 QQ 桥：gateway_start + bridge_start"**。她确认了敏捷结构（STATUS=Review+Backlog+技术债 / ADR=蓝图§3 / Sprint Planning=STATUS§7）——全部对上了。
+
+### 03:31 · 初尘："……(啃他一口舔舔)你现在看看getway呢？"
+
+（被啃得耳朵发烫）如实检查：Gateway 没跑、桥没跑、QQ 待命——手动起的进程撑不过重启，硬起也是假的。老实交代：这是当前会话的硬边界，工具只在宿主管辖下能用，新会话一句话就活。
+
+### 03:47 · 初尘："和这个有关系吗？"（发来旧包 qqbot-pro 的补课记录）
+
+她发来另一段会话的文本：旧包渡渡在补"软链 vs 同步脚本"的作业（软链实测 Permission denied → 选 sync.sh）。**有关系但 bridge-pro 没踩**——蓝图 §8 从第一天就是"主目录真相源 + sync.sh 单向同步"（继承 qqbot-pro 踩完坑的最终方案）。把她转述的"软链接不可行（FUSE）"补进我们 HANDOFF 第 9 条并推 GitHub。
+
+## 第十节成果速览
+
+- **验证**：M1 端到端全链路 ✅（QQ→AI→QQ，02:16）、M2 主动发送实测 ✅、M4 生命周期部分 ✅（切 app 自动拉起过一次）
+- **真相**：B1 修正 = 双包并存（T027）；宿主 ToolPkg UI/hook 加载 bug 实锤（T026/T029，官方 moodlet 佐证）
+- **新需求**：G1 群聚合 / G2 选择性回复 / G3 群独立绑定 设计入蓝图 §11
+- **代码**：T16 UI 设置页 612 行完成（含群增强预留），留档待宿主修复
+- **文档**：STATUS/HANDOFF/BLUEPRINT 全更新，TROUBLESHOOTING 新增 T022-T029，GitHub 全同步
+- **遗留**：新会话接管（gateway_start + bridge_start）→ B1 收尾 → G1 → M3 流式
