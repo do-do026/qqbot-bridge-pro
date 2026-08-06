@@ -52,7 +52,7 @@ Operit 当前的限制：此宿主版本对 ToolPkg compose_dsl UI 的热烧录/
 ### 3.2 群聊
 
 1. 默认按 `group:{group_openid}` 创建/复用 Operit 对话，这是当前性价比最高且可解释的方案。
-2. 同群消息默认 25 秒/10 条聚合，一次唤醒 AI；避免逐条刷爆对话。
+2. 当前代码仍是约 25 秒/10 条提前触发的旧实现；目标架构改为每群首条有效 @ 消息起算、默认 60 秒，并废弃“桶满提前 flush”，详见 §12。
 3. 群友不绑定独立 Operit 对话。
 4. 群昵称查询默认关闭；关闭或失败时使用 `QQ`+member_openid 后四位。
 5. `target_chat_id` 仅保留为群聊固定目标兼容配置。
@@ -157,7 +157,131 @@ QQ 官方提供 C2C `stream_messages`，Operit 也具备 HTTP 实现条件。但
 - 工作流唤醒 AI 后可向唯一主动目标发文本和图片。
 - 群消息按 group_openid 复用，五人连续消息只产生一轮聚合 AI 调用。
 - 群昵称关闭时只展示后四位；不额外调用昵称接口。
-- 单聊 3、群 5，且只按 `。！？` 计数。
+- 当前代码单聊 3、群 5，只按 `。！？` 计数；目标规则增加归一化后的非空换行，详见 §12.4。
 - Gateway 能独立常驻、停止；关闭监听同时停止自动回复。
 - 所有底层可配置项在工具 API 有可选参数；不配置时使用安全默认值。
 - 文档、manifest、METADATA、src、dist 一致。
+
+## 12. 群窗口与上下文架构增补（2026-08-06 14:32）
+
+### 12.1 确认后的产品语义
+
+- 每个 `group_openid` 有独立聚合窗口。
+- Gateway 开启后，该群第一条符合处理策略的 @Bot 消息到达时记录 `firstAt` 并开始窗口；默认 60 秒，不按自然分钟对齐。
+- 窗口时长必须是配置，不得硬编码：UI、Agent 工具和 `QQBOT_PRO_GROUP_AGGREGATE_WINDOW_MS` 均可修改，默认 `60000`。
+- Gateway 继续接收普通群消息；桥接策略默认 `at_only`，普通群消息不唤醒 AI。C2C 与群聊开关都只控制“是否送给 AI/自动回复”，不改变 Gateway 订阅。
+- 窗口结束后，将本窗口内有效 @ 消息编号为 `#1...#N`，AI 返回有效 `replyTo` 后选择对应原事件的 `msg_id`/`message_reference`。
+- 如果被动回复锚点过期：AI 的回复若具有明显针对性，降级为主动群消息并尽力文本点名；若内容可回可不回，则放弃发送并记录原因。真正的客户端原生 @ 能力需单独实测，不能只凭文本 `@昵称` 承诺。
+
+### 12.2 可选前后文
+
+普通群消息可以作为 @ 消息的邻近上下文，但不直接唤醒 AI：
+
+- 总开关：`groupContextEnabled` / `QQBOT_PRO_GROUP_CONTEXT_ENABLED`，默认关闭；UI 和 Agent 均可切换。
+- 默认每条 @ 消息向前 5 条、向后 5 条；允许分别配置，也可提供统一环境变量 `QQBOT_PRO_GROUP_CONTEXT_LIMIT=5`。
+- 单次交给 AI 的邻近上下文最大 `20` 条；任何 UI/API/env 输入都必须 clamp 到 0～20。
+- AI 在运行中可以选择是否请求上下文；“允许上下文”与“每次自动附带上下文”应拆成两个概念，避免无意义 token 消耗。
+- 第一阶段建议实现 `off / automatic / agent_on_demand` 三态：默认 `off`；`automatic` 自动附带；`agent_on_demand` 只在 AI 明确调用查询工具时返回。
+- 上下文消息与 @ 触发消息必须有不同标记，普通上下文不得进入 `replyTo` 候选，除非后续明确扩展。
+
+### 12.3 容量与并发
+
+- 单群聚合安全上限可配置：`QQBOT_PRO_GROUP_MAX_ITEMS`，默认 30；超过后不提前 flush，只保留该群最新 N 条并记录 overflow/dropCount。
+- Gateway/桥接全局上下文缓存采用独立最新保留上限：建议默认 100，可配置 `QQBOT_PRO_GROUP_GLOBAL_CACHE_MAX_ITEMS`；达到上限后跨群按时间淘汰最旧项、保留最新项。
+- 同时 flush 到期群的最大并发数可配置：`QQBOT_PRO_GROUP_FLUSH_CONCURRENCY`，默认 3；必须 clamp 到安全范围，例如 1～8。
+- 现有 `groupAggregateMaxItems=10` 的“桶满提前 flush”语义废弃，迁移为单群安全保留上限；配置迁移需要兼容旧字段但不能继续一字段两义。
+
+### 12.4 Waifu 规则更新
+
+- 句末计数调整为 `。！？\n`。
+- 连续换行先归一化为单个换行；空白行不重复累计。
+- 单聊默认 3，群聊默认 5，400 字符仍作独立安全兜底。
+- 单聊流式分段和群聊完整文本分段必须抽成一个共享 chunker，禁止继续维护两套正则。
+
+### 12.5 临时桥接 Prompt
+
+已找到内置 `com.operit.message_insert_bundle` 的可参考实现：
+
+- 需要落盘时使用 `ToolPkg.registerPromptInputHook` 的 `before_process` 阶段。
+- 不落盘时使用 `ToolPkg.registerPromptFinalizeHook` 的 `before_send_to_model` 阶段。
+- 因而“桥接 Prompt 只在当轮发给模型、不保存聊天记录”具有可行实现路径，不再直接放弃。
+- 风险：QQ 桥通过 `Tools.Chat.sendMessageStreaming` 后台向指定 chat 发送，必须先验证 Prompt Finalize Hook 是否对这种程序化 Chat 调用触发、能否准确识别目标 chat/turn，且不会注入普通 Operit 手输消息。
+- 若 Hook 不覆盖程序化发送，则回退到短控制附件落盘或等待宿主提供 `ephemeral_instruction`；禁止使用难以验证的数据库后删消息 hack。
+
+### 12.6 新 Epic 与子任务
+
+#### Epic G0：配置模型与迁移（最先做）
+
+1. 建立唯一配置 schema 和字段表。
+2. 明确优先级：持久化 config > env 初始化/回退 > defaults；UI 与 Agent 均调用同一个 configure service。
+3. 新增/迁移窗口、上下文模式、前后条数、单群上限、全局缓存、flush 并发、群消息模式。
+4. 对所有数值做范围校验和 clamp。
+5. 废弃旧 `groupAggregateMaxItems` 提前 flush 语义并提供迁移。
+
+#### Epic G1：群事件分流与可恢复缓存
+
+1. `GROUP_AT_MESSAGE_CREATE` 作为默认触发事件。
+2. 普通 `GROUP_MESSAGE_CREATE` 只进上下文环形缓存，不唤醒 AI。
+3. 每群独立 firstAt；用事件 `receivedAt` 重建窗口，避免重启后重新等一分钟。
+4. 单群最新 30/可配置、全局最新 100/可配置的双层淘汰。
+5. C2C/group 开关关闭时清理对应待处理状态，但 Gateway 保持运行。
+
+#### Epic G2：上下文查询
+
+1. off/automatic/agent_on_demand 三态。
+2. 前 5、后 5、最大 20。
+3. @ 事件与上下文消息编号隔离。
+4. Agent 查询工具必须按 group、anchor event、before/after/limit 请求，不能一次泄露全部群缓存。
+5. 测试普通消息不会自己触发 AI。
+
+#### Epic G3：编号 replyTo 与时效降级
+
+1. 稳定批次键：hash(sorted eventKeys)，禁止 Date.now 作为幂等键。
+2. AI JSON/结构化协议 `{replyTo, content, fallbackPreference}`。
+3. 选择对应 msg_id/message_reference；群 5 分钟时效预留安全边界。
+4. 过期后 active_send / drop 两种降级，并记录原因。
+5. 真正原生 @ 单独做平台实测。
+
+#### Epic G4：统一 Waifu chunker
+
+1. 抽独立模块。
+2. `。！？\n`、连续换行归一化、400 字兜底。
+3. 单聊流式和群完整回复共用同一状态机。
+4. 覆盖 emoji、无标点、连续空行测试。
+
+#### Epic G5：非落盘 Prompt 兼容验证
+
+1. 做最小 ToolPkg Hook 探针。
+2. 验证后台 `Tools.Chat.sendMessageStreaming` 是否经过 before_send_to_model。
+3. 验证只修改模型请求、不改变持久化 user turn。
+4. 验证多 chat 并发时不会串 prompt。
+5. 成功后再移植 message_insert 的双阶段模式。
+
+#### Epic G6：UI（字段稳定后做）
+
+覆盖原 QQ Bot UI，并增加窗口、上下文三态、前后条数、容量、并发、replyTo/降级策略、Waifu 与桥接 Prompt 持久化选项。UI 只能调用统一配置服务，禁止直接写 config.json。
+
+### 12.7 实施顺序
+
+1. G0 配置 schema/迁移。
+2. G1 事件分流与可恢复缓存。
+3. G4 统一 chunker（可与 G1 并行，但合并前先统一测试）。
+4. G2 上下文查询。
+5. G3 replyTo/引用/过期降级。
+6. G5 临时 Prompt 探针与实现。
+7. 可靠性 Sprint：事务状态机、token 缓存、错误码/Trace ID、故障注入。
+8. G6 UI。
+9. 全链路验收、文档审计与发布。
+
+### 12.8 新增技术债/屎山风险
+
+- Gateway 原始队列既承担消息总线又承担一分钟缓冲，存在查询 limit 截断和队列淘汰风险；应引入桥接侧持久化事件/上下文 store。
+- 前后文里的“后 5 条”天然需要延迟或二次补齐；必须定义是窗口结束时向后取，不能在 @ 到达瞬间伪造后文。
+- 上下文缓存、聚合桶、records 三套状态若分别写文件会产生一致性问题；应统一为版本化 store 和原子写策略。
+- 多群并发 flush 会并发调用同一个 Chat/Gateway/OpenAPI；需按 chatId 串行、跨 chat 有限并发，不能只做粗暴 Promise.all。
+- replyTo 控制协议与自然语言回复混合会解析脆弱；应有严格 schema、容错解析和纯文本降级。
+- 主动降级发送与被动回复频控不同，必须记录发送模式、错误码与平台 Trace ID。
+- Prompt Finalize Hook 是全局 Hook；若不建立 turn token/chatId 白名单，可能污染普通聊天，是高风险实现点。
+- 配置字段继续堆在 `bridge_auto.js` 会变成 God Object；应拆分 config、router、aggregate_store、context_store、reply_selector、chunker、sender。
+- src/dist 手工复制仍是流程债；至少让 sync.sh 校验 hash，长期应建立编译/生成流程。
+- 当前 UI 源码仍含已放弃 G3 和过时字段，正式启用前必须重写，不能在旧 UI 上继续补丁叠补丁。
