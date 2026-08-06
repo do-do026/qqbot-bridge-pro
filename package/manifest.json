@@ -8,8 +8,8 @@
     "en": "QQ Bot Bridge Pro"
   },
   "description": {
-    "zh": "QQ Bot 桥接增强包：整合原 qqbot_bundle 全部能力 + qqbot-pro 增强能力。收消息（增强 Gateway 事件全放开）、发消息（文本/Markdown/引用/输入态/图片）、自动回复桥（QQ→Operit 指定对话→AI 回复→QQ，waifu 三句号切分）、AI 主动发送（候选列表）、官方流式（单聊 stream_messages）。独立安装，可顶替原包。",
-    "en": "QQ Bot Bridge Pro: merged capabilities of qqbot_bundle and qqbot-pro. Gateway receive, send (text/markdown/reference/input-notify/image), auto-reply bridge (QQ -> Operit chat -> AI reply -> QQ with waifu flush), AI proactive send (candidate list), official streaming (C2C stream_messages). Drop-in replacement for the original bundle."
+    "zh": "QQ Bot 桥接增强包：整合原 qqbot_bundle 全部能力 + qqbot-pro 增强能力。收消息（增强 Gateway 事件全放开）、发消息（文本/Markdown/引用/输入态/图片）、自动回复桥（QQ→Operit 指定对话→AI 回复→QQ，waifu 三句号切分）、AI 主动发送（候选列表）；保留官方单聊 stream_messages 的架构位置，当前未实现。独立安装，可顶替原包。",
+    "en": "QQ Bot Bridge Pro: merged capabilities of qqbot_bundle and qqbot-pro. Gateway receive, send (text/markdown/reference/input-notify/image), auto-reply bridge (QQ -> Operit chat -> AI reply -> QQ with waifu flush), AI proactive send (candidate list); reserves an architecture slot for C2C stream_messages (not implemented). Drop-in replacement for the original bundle."
   },
   "enabled_by_default": true,
   "subpackages": [
@@ -22,8 +22,8 @@
         "en": "Bridge Pro Basic"
       },
       "description": {
-        "zh": "撤回、文本/Markdown/引用/输入态发送、图片发送、流式发送、群信息/群状态/机器人资料查询、AI 主动发送候选列表",
-        "en": "Recall, send (text/markdown/reference/input-notify), image send, stream send, group info / bot state / profile queries, AI proactive target list"
+        "zh": "撤回、文本/Markdown/引用/输入态发送、图片发送、群信息/群状态/机器人资料查询、AI 主动发送候选列表",
+        "en": "Recall, send (text/markdown/reference/input-notify), image send, group info / bot state / profile queries, AI proactive target list"
       }
     },
     {
