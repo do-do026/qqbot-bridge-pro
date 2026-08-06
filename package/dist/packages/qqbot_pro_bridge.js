@@ -83,7 +83,9 @@
                 "zh": "列出已经实际发来消息的 C2C 联系人，不自动把全部联系人推送给 AI。",
                 "en": "List C2C contacts discovered from inbound messages without pushing all contacts to AI."
             },
-            "parameters": []
+            "parameters": [
+                { "name": "reveal_openid", "description": { "zh": "默认 false，只返回后四位；绑定或主动发送前明确设为 true 才返回完整 openid。", "en": "False by default; reveal the full openid only when explicitly needed for binding or sending." }, "type": "boolean", "required": false }
+            ]
         },
         {
             "name": "qqbot_pro_bridge_bind_c2c",
