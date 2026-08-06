@@ -336,7 +336,8 @@ function resolveSendTarget(scene, params) {
         if (candidates.group.length === 0) {
             throw new Error("No group_openid provided and QQBOT_PRO_TARGET_GROUP_OPENIDS is empty");
         }
-        const idx = parsePositiveInt(params.target_index == null ? 0 : params.target_index, "target_index", 0);
+        const idx = Number(params.target_index == null ? 0 : params.target_index);
+        if (!Number.isInteger(idx) || idx < 0) throw new Error("Invalid target_index: expected non-negative integer");
         if (idx >= candidates.group.length) {
             throw new Error(`target_index ${idx} out of range (candidate groups: ${candidates.group.length})`);
         }
@@ -347,7 +348,8 @@ function resolveSendTarget(scene, params) {
     if (candidates.c2c.length === 0) {
         throw new Error("No openid provided and QQBOT_PRO_TARGET_OPENIDS is empty");
     }
-    const idx = parsePositiveInt(params.target_index == null ? 0 : params.target_index, "target_index", 0);
+    const idx = Number(params.target_index == null ? 0 : params.target_index);
+        if (!Number.isInteger(idx) || idx < 0) throw new Error("Invalid target_index: expected non-negative integer");
     if (idx >= candidates.c2c.length) {
         throw new Error(`target_index ${idx} out of range (candidate users: ${candidates.c2c.length})`);
     }
