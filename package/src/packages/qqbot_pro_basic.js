@@ -16,7 +16,8 @@
     "env": [
         { "name": "QQBOT_APP_ID", "description": { "zh": "QQ Bot AppID（复用原包环境变量）", "en": "QQ Bot AppID" }, "required": false },
         { "name": "QQBOT_APP_SECRET", "description": { "zh": "QQ Bot AppSecret（复用原包环境变量）", "en": "QQ Bot AppSecret" }, "required": false },
-        { "name": "QQBOT_PRO_SANDBOX", "description": { "zh": "是否使用沙箱 OpenAPI（true/false）", "en": "Use sandbox OpenAPI" }, "required": false }
+        { "name": "QQBOT_PRO_SANDBOX", "description": { "zh": "是否使用沙箱 OpenAPI（true/false）", "en": "Use sandbox OpenAPI" }, "required": false },
+         { "name": "QQBOT_PRO_IMAGE_FOLDERS", "description": { "zh": "图片发送允许搜索的本地目录，逗号/换行/分号分隔", "en": "Local folders allowed for image sending" }, "required": false }
     ],
     "tools": [
         {
@@ -40,7 +41,8 @@
             },
             "parameters": [
                 { "name": "openid", "description": { "zh": "单聊目标用户 openid", "en": "Target user openid" }, "type": "string", "required": false },
-                { "name": "group_openid", "description": { "zh": "目标群 openid", "en": "Target group openid" }, "type": "string", "required": false },
+                { "name": "group_openid", "description": { "zh": "目标群 openid；不填时从候选列表取", "en": "Target group openid; falls back to candidate list" }, "type": "string", "required": false },
+                 { "name": "target_index", "description": { "zh": "候选目标下标，默认 0", "en": "Candidate target index, default 0" }, "type": "number", "required": false },
                 { "name": "content", "description": { "zh": "文本内容（msg_type=0 时必填）", "en": "Text content" }, "type": "string", "required": false },
                 { "name": "markdown", "description": { "zh": "Markdown 内容（传此字段自动 msg_type=2，与 content 互斥）", "en": "Markdown content" }, "type": "string", "required": false },
                 { "name": "msg_type", "description": { "zh": "消息类型：0/2/6/7", "en": "Message type" }, "type": "number", "required": false },
@@ -156,9 +158,10 @@ async function qqbot_pro_recall(params) {
 
 async function qqbot_pro_send(params) {
     try {
-        const openid = core.asText(params.openid).trim();
-        const groupOpenid = core.asText(params.group_openid).trim();
-        if (!openid && !groupOpenid) throw new Error("Need openid (C2C) or group_openid (group)");
+        const scene = core.asText(params.group_openid).trim() ? "group" : "c2c";
+        const target = core.resolveSendTarget(scene, params);
+        const openid = scene === "c2c" ? target.targetId : "";
+        const groupOpenid = scene === "group" ? target.targetId : "";
         const snapshot = core.requireConfiguredSnapshot();
         const timeoutMs = core.resolveTimeoutMs(params.timeout_ms);
         const body = core.buildSendBody(params);
@@ -166,7 +169,6 @@ async function qqbot_pro_send(params) {
             throw new Error("Nothing to send: provide content, markdown, input_notify, or media");
         }
         let path;
-        let scene;
         if (groupOpenid) {
             path = `/v2/groups/${encodeURIComponent(groupOpenid)}/messages`;
             scene = "group";
@@ -178,7 +180,7 @@ async function qqbot_pro_send(params) {
         if (!response.success) {
             throw new Error(core.firstNonBlank(core.asText(response.json.message), `HTTP ${response.statusCode}`));
         }
-        return buildResult({ scene, openid, groupOpenid, requestBody: body, httpStatus: response.statusCode, response: response.json });
+        return buildResult({ scene, openid, groupOpenid, fromCandidate: target.fromCandidate, requestBody: body, httpStatus: response.statusCode, response: response.json });
     } catch (error) {
         return buildError(error);
     }
