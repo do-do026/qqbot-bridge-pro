@@ -1507,17 +1507,21 @@ async function qqbot_auto_reply_run_once() {
     }
 }
 
-async function qqbot_pro_bridge_contacts() {
+async function qqbot_pro_bridge_contacts(params = {}) {
+    const revealOpenId = (0, core.parseOptionalBoolean)(params.reveal_openid, "reveal_openid") === true;
     const bindings = await readAutoReplyBindingsAsync();
     const items = Object.keys(bindings)
         .filter((key) => key.startsWith("c2c:"))
-        .map((key) => ({
-            openid: key.slice(4),
-            chatId: bindings[key]?.chatId ?? "",
-            title: bindings[key]?.title ?? "",
-            lastProcessedAt: bindings[key]?.lastProcessedAt ?? ""
-        }));
-    return { success: true, contacts: items };
+        .map((key) => {
+            const openid = key.slice(4);
+            return {
+                ...(revealOpenId ? { openid } : { openidSuffix: openid.slice(-4) }),
+                chatId: bindings[key]?.chatId ?? "",
+                title: bindings[key]?.title ?? "",
+                lastProcessedAt: bindings[key]?.lastProcessedAt ?? ""
+            };
+        });
+    return { success: true, revealOpenId, contacts: items };
 }
 
 async function qqbot_pro_bridge_bind_c2c(params = {}) {
