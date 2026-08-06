@@ -20,8 +20,11 @@ fi
 # 1. 同步 dev_package <- 主目录（官方烧录需要）
 mkdir -p "$DEV_DIR"
 rm -rf "$DEV_DIR/manifest.json" "$DEV_DIR/src" "$DEV_DIR/dist" "$DEV_DIR/resources" "$DEV_DIR/test"
-cp -r "$MAIN_DIR/manifest.json" "$MAIN_DIR/src" "$MAIN_DIR/dist" "$MAIN_DIR/resources" "$MAIN_DIR/test" "$DEV_DIR/"
-echo "OK  dev_package 已同步 (manifest/src/dist/resources/test)"
+cp -r "$MAIN_DIR/manifest.json" "$MAIN_DIR/src" "$MAIN_DIR/dist" "$MAIN_DIR/resources" "$DEV_DIR/"
+if [ -d "$MAIN_DIR/test" ]; then
+    cp -r "$MAIN_DIR/test" "$DEV_DIR/"
+fi
+echo "OK  dev_package 已同步 (manifest/src/dist/resources + optional test)"
 
 # 2. 清理 pycache
 rm -rf "$DEV_DIR/resources/__pycache__" "$MAIN_DIR/resources/__pycache__"
