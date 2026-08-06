@@ -40,8 +40,14 @@
                 { "name": "chat_group", "description": { "zh": "为自动创建的 Operit 对话指定分组名，默认 QQ Bot", "en": "Group for auto-created chats, default QQ Bot" }, "type": "string", "required": false },
                 { "name": "character_card_id", "description": { "zh": "可选：绑定到自动回复会话的角色卡 ID", "en": "Character card ID" }, "type": "string", "required": false },
                 { "name": "assistant_instruction", "description": { "zh": "每次桥接到 Operit 时附带的回复指令", "en": "Instruction prepended when bridging" }, "type": "string", "required": false },
-                { "name": "target_chat_id", "description": { "zh": "可选：固定桥接到指定 Operit 对话 ID。留空则自动为每个 QQ 会话创建专属对话；也可用环境变量 QQBOT_TARGET_CHAT_ID 设置。", "en": "Pin to a specific Operit chat ID; fallback to env QQBOT_TARGET_CHAT_ID" }, "type": "string", "required": false },
-                { "name": "waifu_flush_sentences", "description": { "zh": "流式回复的切分粒度：攒够 N 个句子结束符（。！？…换行）才发一条消息，默认 3。避免逐句刷屏，同时防止大段被截断。", "en": "Flush after N sentence-ending chars, default 3" }, "type": "number", "required": false },
+                { "name": "target_chat_id", "description": { "zh": "仅用于群聊：固定桥接到指定 Operit 对话 ID。C2C 按 openid 分离，固定私聊使用 c2c_fixed_bindings。", "en": "Pin to a specific Operit chat ID; fallback to env QQBOT_TARGET_CHAT_ID" }, "type": "string", "required": false },
+                { "name": "waifu_flush_sentences", "description": { "zh": "单聊切分句数；仅统计。！？；默认 3。", "en": "C2C flush sentence count; counts 。！？ only; default 3." }, "type": "number", "required": false },
+                { "name": "group_waifu_flush_sentences", "description": { "zh": "群聊切分句数；仅统计。！？；默认 5。", "en": "Group flush sentence count; counts 。！？ only; default 5." }, "type": "number", "required": false },
+                { "name": "proactive_c2c_openid", "description": { "zh": "唯一 C2C 主动发送目标 openid；留空取消。", "en": "Single C2C proactive target openid; blank clears." }, "type": "string", "required": false },
+                { "name": "group_aggregate_window_ms", "description": { "zh": "群消息聚合窗口，默认 25000。", "en": "Group aggregation window, default 25000." }, "type": "number", "required": false },
+                { "name": "group_aggregate_max_items", "description": { "zh": "群聚合最大条数，默认 10。", "en": "Maximum group aggregation items, default 10." }, "type": "number", "required": false },
+                { "name": "group_nickname_enabled", "description": { "zh": "是否尝试获取群昵称；关闭时只提供 openid 后四位。", "en": "Try group nicknames; when off, provide only the last four openid characters." }, "type": "boolean", "required": false },
+                { "name": "c2c_fixed_bindings", "description": { "zh": "C2C 固定绑定数组：[{openid,chatId,title}]。", "en": "C2C fixed bindings array: [{openid,chatId,title}]." }, "type": "array", "required": false },
                 { "name": "start_now", "description": { "zh": "保存配置后是否立即启动自动回复循环", "en": "Start loop immediately" }, "type": "boolean", "required": false }
             ]
         },
@@ -68,6 +74,44 @@
             "description": {
                 "zh": "停止自动回复循环。",
                 "en": "Stop the auto-reply loop."
+            },
+            "parameters": []
+        },
+        {
+            "name": "qqbot_pro_bridge_contacts",
+            "description": {
+                "zh": "列出已经实际发来消息的 C2C 联系人，不自动把全部联系人推送给 AI。",
+                "en": "List C2C contacts discovered from inbound messages without pushing all contacts to AI."
+            },
+            "parameters": []
+        },
+        {
+            "name": "qqbot_pro_bridge_bind_c2c",
+            "description": {
+                "zh": "把一个 C2C openid 绑定到指定 Operit 对话。",
+                "en": "Bind one C2C openid to a specific Operit chat."
+            },
+            "parameters": [
+                { "name": "openid", "description": { "zh": "C2C openid", "en": "C2C openid" }, "type": "string", "required": true },
+                { "name": "target_chat_id", "description": { "zh": "Operit 对话 ID", "en": "Operit chat ID" }, "type": "string", "required": true },
+                { "name": "title", "description": { "zh": "可选标题", "en": "Optional title" }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "qqbot_pro_bridge_set_proactive_target",
+            "description": {
+                "zh": "设置唯一的 C2C 主动发送目标 openid。",
+                "en": "Set the single C2C proactive-send target openid."
+            },
+            "parameters": [
+                { "name": "openid", "description": { "zh": "目标 openid；留空取消", "en": "Target openid; blank clears" }, "type": "string", "required": false }
+            ]
+        },
+        {
+            "name": "qqbot_pro_bridge_list_image_folders",
+            "description": {
+                "zh": "列出图片发送允许搜索的本地目录。",
+                "en": "List local folders allowed for image sending."
             },
             "parameters": []
         },
