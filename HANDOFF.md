@@ -1,6 +1,6 @@
 # qqbot-bridge-pro 冷启动接续文档
 
-> 更新时间：2026-08-06 14:47。新窗口先读 `V2-BLUEPRINT.md` §12，再读 `STATUS.md`；从 Epic G0 开始实施。
+> 更新时间：2026-08-06 15:2x（G0补 groupAiTimeoutMs 完成）。新窗口先读 `V2-BLUEPRINT.md` §12，再读 `STATUS.md`；G0 已完成，从 Epic G1 开始实施。
 
 ## 1. 项目
 
@@ -26,10 +26,19 @@
 
 尚未完成/验证：
 
+- **G1 群事件分流/可恢复缓存**（当前入口，见 §6）。
 - 完整 UI；旧 UI 源码内容过时且注册仍被注释。
 - 图片目录专用浏览工具。
-- 新版本安装烧录和真实场景验收。
+- 新版本安装烧录和真实场景验收（G0 已代码完成但未烧录）。
 - token 缓存、事务级幂等、错误码映射。
+
+### G0 完成摘要（2026-08-06 15:0x）
+
+- 新建 `src/shared/bridge_config.js`：唯一 schema（26 字段、schema v2，含 `groupAiTimeoutMs`），三级优先级（持久化 config > env > defaults），int clamp + enum 校验，旧字段迁移。
+- `bridge_auto.js` 删 126 行本地配置堆；`writeAutoReplyConfigAsync` 写回完整 schema；`flushDueGroupBucketsAsync` 废弃桶满提前 flush（超 `groupMaxItems` 只保留最新 + overflowCount）。
+- 超时判定提前落地：群聚合 AI 调用 120s/单次尝试 → `group_ai_timeout`；锚点超 4 分钟 → `anchor_expired_dropped` 放弃并记录（点名降级待 G3）。
+- `qqbot_pro_bridge_configure` 新增 10 参数（含 group_ai_timeout_ms）、兼容旧 `group_aggregate_max_items`、返回 `changes`；METADATA env +9。
+- src/dist 一致、sync.sh 全过、27 项冒烟测试全过；dev_package 已同步，**已烧录**（新会话可见新工具）。
 
 ## 3. 产品铁律
 
@@ -74,8 +83,8 @@ Operit 指南：
 
 ## 6. 下一步实施顺序
 
-1. **G0 配置 schema/迁移**：先统一 config/env/UI/API 优先级，废弃旧满桶提前 flush 语义。
-2. **G1 事件分流/缓存**：@ 触发、普通群消息仅缓存、每群 firstAt、单群/全局容量、重启恢复。
+1. ~~**G0 配置 schema/迁移**~~ ✅ 已完成（bridge_config.js）。
+2. **G1 事件分流/缓存**：@ 触发、普通群消息仅缓存、每群 firstAt、单群/全局容量、重启恢复。（当前）
 3. **G4 统一 chunker**：`。！？\n`、连续换行归一化、400字符兜底。
 4. **G2 上下文工具**：三态、前后5、最大20。
 5. **G3 replyTo/引用/过期降级**。
@@ -84,12 +93,14 @@ Operit 指南：
 8. **最后做 G6 UI**，禁止在旧 UI 上继续补丁堆叠。
 9. 每个 Epic 完成后更新 STATUS 的代码/部署/验证三态；全部实测后再发布。
 
+> 烧录提醒：G0 已烧录验证。烧录后旧会话通常看不到新工具，需新开会话验证。
+
 ## 7. 实施约束
 
 - 现在的 src/dist 保持上一轮已安装代码；14:32 新需求只写入文档，没有暴露未实现工具参数。
 - 不要从 README 摘要直接编码；先读 BLUEPRINT §12 的边界和迁移要求。
 - UI 与 Agent 必须调用统一配置服务，不能直接写 config.json。
-- “后5条”在窗口结束时取；不能在 @ 到达瞬间假装已经存在。
+- "后5条"在窗口结束时取；不能在 @ 到达瞬间假装已经存在。
 - Prompt Hook 必须用 chatId/turn token 白名单隔离，防止注入普通 Operit 对话。
 - 真正 QQ 原生 @、引用样式和主动群消息降级必须实机验证，未验证不写成已支持。
 - sync.sh 的 optional test 目录问题已经修复；每次改源码后同步 src/dist 并跑语法检查。
@@ -111,12 +122,18 @@ Operit 指南：
 ├── V2-BLUEPRINT.md
 ├── STATUS.md
 ├── HANDOFF.md
+├── TROUBLESHOOTING.md
+├── CHANGELOG.md
 ├── package/
 │   ├── manifest.json
 │   ├── resources/qqbot_pro_gateway.py
 │   ├── src/
+│   │   ├── shared/bridge_config.js   ← Epic G0 唯一配置 schema
+│   │   ├── shared/bridge_auto.js
+│   │   ├── shared/bridge_state.js
+│   │   └── shared/core.js
 │   └── dist/
 └── scripts/sync.sh
 ```
 
-每次迭代必须同步 README、BLUEPRINT、STATUS、HANDOFF、manifest、METADATA、src 和 dist。
+每次迭代必须同步 README、BLUEPRINT、STATUS、HANDOFF、TROUBLESHOOTING、CHANGELOG、manifest、METADATA、src 和 dist。
