@@ -323,3 +323,99 @@
 **验证方法**：原包 Gateway 成功停止（返回 control 停止 + 进程清空）。
 
 ---
+
+### T022：子包烧录后启用状态未保留（toolCount=0 全灭）
+
+**现象**：主包 `com.operit.qqbot_bridge_pro` 已安装且 enabled，但 `toolCount: 0`；三个子包（basic/gateway/bridge）均 `enabled:false / imported:false`，18 工具一个都不挂。
+
+**根因**：`debug_install_toolpkg` 默认 `reset_subpackage_states=true`，把上次烧录的子包启用状态重置。
+
+**修复**（2026-08-06 02:05）：烧录时传 `activate_subpackages="qqbot_bridge_pro_basic,qqbot_bridge_pro_gateway,qqbot_bridge_pro_bridge"` 显式激活（或 `reset_subpackage_states=false`）。
+
+**验证方法**：烧录返回子包 `currentEnabled=true`；新会话工具可见。
+
+---
+
+### T023：listenerEnabled 无代码置 true（桥永远不启动）
+
+**现象**：桥配置 `autoReply.enabled=true` 但桥不启动；`readActiveAutoReplyContextAsync` 返回 `disabledReason=listener_disabled`。
+
+**根因**：gateway.js 不写 `listenerEnabled` 字段；bridge_auto.js 只在它为 false 时把 `enabled` 打回 false——**没有任何代码把它置 true**，首次配置必须手工写 config.json。
+
+**修复**（2026-08-06 02:08）：手工编辑 `plugins/com.operit.qqbot_bridge_pro/config.json` 置 `listenerEnabled=true`（+ `autoReply.enabled=true`）。
+
+**验证方法**：桥状态 `running=true`。
+
+---
+
+### T024：腾讯网关必须带 Accept: application/json 头
+
+**现象**：手写 token 请求（不带 Accept 头）返回 `{"code":100007,"message":"appid invalid"}`；而 Gateway 用同一凭证能连上——误导排查方向以为是凭证问题。
+
+**根因**：腾讯网关要求 `Accept: application/json` 头，缺失时误报 `appid invalid`。
+
+**修复**（2026-08-06 02:23）：请求头加 `Accept: application/json`（core.js 已带；任何手写 HTTP 调用必须注意）。
+
+**验证方法**：带上后 token 正常返回（expires_in=6319），主动消息 POST 状态 200 送达。
+
+---
+
+### T025：GitHub secret scanning 拦截仓库内明文 token
+
+**现象**：HANDOFF.md 里写了 GitHub Token 明文，REST PUT 返回 409 `Repository rule violations found / Secret detected in content`。
+
+**根因**：GitHub 仓库开启 secret scanning，拒绝含密钥的内容（保护性规则，好事）。
+
+**修复**（2026-08-06 02:40）：文档中 token 引用改为"见记忆库凭证条目"，重新推送 200。
+
+**验证方法**：PUT 200。
+
+---
+
+### T026：debug_install_toolpkg 烧录含 UI 模块的包报 container 未出现
+
+**现象**：main.js 加 `registerToolboxUiModule` 后，`debug_install_toolpkg` 报 `ToolPkg container did not appear`，包不进注册表（ping_mcp not found）；移除 UI 注册立即恢复。
+
+**根因**：宿主对 ToolPkg UI 模块加载存在 bug——**文件版 / 内联版 / 改唯一 id / 冷启动（重启 Operit）全部复现**；logcat 显示其他带 UI 的官方包（moodlet）同样报 `toolpkg registration session is not active`。不是包代码问题。
+
+**修复**（2026-08-06 02:47-03:06）：UI 代码完成（612 行）留档 `src/ui/qqbot_settings/index.ui.js`；main.js 注册注释保留；**回滚无 UI 版保核心链路**。待宿主修复或验证市场导入路径。
+
+**验证方法**：无 UI 版烧录成功、18 工具挂载、Gateway 正常。
+
+---
+
+### T027：消息重复到达真相 = 原包+新包双跑（B1 修正）
+
+**现象**：同一 messageId 在绑定对话出现多条 user 条目 + 两条不同 AI 回复（"菇咕弹…"与"通了通了…"）；曾误判为 Gateway 去重 bug。
+
+**根因**（2026-08-06 03:10 查实）：02:15 初尘从**原包 UI** 按下监听开关激活原包桥（startSource=`qqbot_auto_reply_configure`），原包 Gateway(32145) 与新包 Gateway(32146) **同 AppID 并存**，同一消息被两个包各自处理。
+
+**修复**：顶替验证时确保原包完全停止（`listenerEnabled=false` + 杀进程）；"入队去重"降级为防御性改进。
+
+**验证方法**：原包停止后单包链路无重复条目。
+
+---
+
+### T028：手动起的 Gateway 进程随 Operit 重启消亡
+
+**现象**：super_admin terminal 手动 nohup/setsid 起的 python3 Gateway 在 Operit 重启后消失，32146 无监听。
+
+**根因**：proot 终端后台进程生命周期与 Operit 进程绑定，重启即回收——**手动起不是持久方案**。
+
+**修复**（2026-08-06 03:16 起）：必须用宿主管理——新会话调 `qqbot_pro_gateway_start`（`Tools.System.terminal.hiddenExec` + executorKey，由宿主托管）。
+
+**验证方法**：新会话 `gateway_start` 后 running+connected，且重启后仍可恢复。
+
+---
+
+### T029：宿主 ToolPkg registration session 报错（hooks 不触发 + 工具不可见）
+
+**现象**：重启后主包 `enabled:true`，但 `application_on_create` hooks 不触发（桥 lastPollAt 停在旧值）；logcat 无 registerToolPkg 日志；packageLogs 显示 moodlet 等**带 UI 的官方包**同样报 `toolpkg registration session is not active`；当前会话工具列表仍 `Tool not found`。
+
+**根因**：Operit 宿主在特定加载路径下 registration session 未激活，ToolPkg 的 UI/hook 注册被跳过（官方包同样中招 = 宿主 bug）；工具列表为会话启动快照（见 T009）。
+
+**修复**（2026-08-06 03:22）：非包侧可修。文档记录接管路径：**新开会话 → `qqbot_pro_gateway_start` → `qqbot_pro_bridge_start`**。
+
+**验证方法**：新会话工具可见后 start 成功、桥 lastPollAt 开始更新。
+
+---
