@@ -322,6 +322,12 @@ function readTargetCandidates() {
  * 解析发送目标：优先显式传入的 openid/group_openid；否则从候选列表取（target_index 指定，默认 0）。
  * scene: "c2c" | "group"
  */
+function readImageFolders() {
+    const raw = readEnv("QQBOT_PRO_IMAGE_FOLDERS");
+    const seen = new Set();
+    return raw.split(/[,\n;]/).map((item) => item.trim()).filter((item) => item && !seen.has(item) && (seen.add(item), true));
+}
+
 function resolveSendTarget(scene, params) {
     const candidates = readTargetCandidates();
     if (scene === "group") {
@@ -382,5 +388,6 @@ module.exports = {
     buildSendMediaBody,
     uploadMediaFile,
     readTargetCandidates,
+    readImageFolders,
     resolveSendTarget
 };
