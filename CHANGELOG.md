@@ -119,3 +119,16 @@
 - 复用原包环境变量凭证（QQBOT_APP_ID/SECRET）
 - git push 改用 REST API（T006：smart HTTP 被墙）
 - 不修改原包（用户约束：独立增强，原包继续承担收消息+自动回复桥）
+
+### qqbot-bridge-pro 第十节：M1 验证 + M2 主动发送 + B1 真相 + T16 UI ✅（2026-08-06 02:04-03:47）
+
+- **M1 T09 端到端真实验证 ✅**（02:16）：QQ→Gateway(32146)→绑定对话 166abbb7→AI→回 QQ 全链路通；回复同时落盘 Operit 对话；M4 T13 生命周期顺带验证（切 app 自动拉起桥，startSource=application_on_create）
+- **M2 主动发送实测 ✅**（02:23）：`QQBOT_PRO_TARGET_OPENIDS` 配置（CC9F593975D8C8F1E1EC72DD91305C63）+ 直接 OpenAPI POST 送达 QQ（踩 Accept 头坑 T024）；`QQBOT_TARGET_CHAT_ID` env 兜底确认
+- **桥配置迁移**：listenerEnabled=true + target_chat_id + 角色卡 b89f6656 + waifu=3 落盘新包 config.json（手工补 listenerEnabled，T023）
+- **B1 真相修正**（03:10）：消息重复 = 原包+新包同 AppID 双跑（02:15 初尘按原包 UI 激活原包桥），非 Gateway 去重 bug；原包停止后自愈
+- **T16 UI 设置页代码完成**（612 行，compose_dsl：状态/凭证/自动化含绑定对话 ID/群增强 G1-G3 预留/运行控制，双语）；宿主 ToolPkg UI 模块加载 bug（`toolpkg registration session is not active`，官方 moodlet 佐证）→ 注册注释保留，UI 留档 `src/ui/qqbot_settings/index.ui.js`
+- **群聊增强设计入蓝图 §11**：G1 聚合窗口（默认 25s，groupAggregateWindowMs/MaxItems）/ G2 选择性回复 / G3 群独立绑定（groupTargetChatId / groupAutoCreateChat）
+- **原包停用 + 接管验证**：原包 listenerEnabled=false + 进程已杀 ✅；新包 Gateway 手动起可连通，但进程随 Operit 重启消亡（T028）→ 需新会话 `qqbot_pro_gateway_start` + `qqbot_pro_bridge_start` 宿主管辖接管（HANDOFF 03:25 紧急快照）
+- **密钥审计**：16 文件 grep 零硬编码，凭证全走环境变量
+- **GitHub**：STATUS / HANDOFF / V2-BLUEPRINT / UI 源码（src+dist）/ main.js 全部推送；踩 secret scanning 明文 token 拦截（T025）
+- **遗留**：新会话接管 → B1 收尾 → G1 群聚合 → G2/G3 → M3 流式 → T16 UI 待宿主修复/市场导入路径
