@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-08
+
+### qqbot-pro v0.3.0 合并后首轮真机修复（01:1x-01:5x）
+- **T037 Gateway 资源解出修复**：`ToolPkg.readResource` 第二参数应为 `outputFileName` 而非完整路径（返回值是临时路径）；新增 `ensureGatewayScriptAsync()` 统一解资源+落盘+兜底，两处启动逻辑改调；顺带清理合并残留（`--source 'qqbot_bridge_pro'` / executorKey / METADATA name）
+- **验证**：删除 STATE_DIR 的 py 后启动自动解出 37759B 并 connected=true ✅
+- **T038 烧录重置子包状态**：`debug_install_toolpkg` 默认 `reset_subpackage_states=true`，烧录后需重新 `set_sandbox_package_enabled` 启用三子包
+- 全链路恢复：增强版 Gateway connected（渡渡在线）+ 桥 idle 轮询（C2C 绑定初尘 / 群聚合 60s at_only / waifu 3+5）
+- 文档同步：TROUBLESHOOTING T037/T038；本 CHANGELOG；HANDOFF/STATUS 更新；GitHub 推送
+
 ## 2026-08-07
 
 ### Epic G1：群事件分流与可恢复缓存 ✅ 代码完成，未烧录
