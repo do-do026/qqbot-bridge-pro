@@ -6,7 +6,7 @@
 "use strict";
 /* METADATA
 {
-    "name": "qqbot_bridge_pro_basic",
+    "name": "qqbot_pro_basic",
     "display_name": { "zh": "QQ Bot Pro 基础增强", "en": "QQ Bot Pro Basic" },
     "description": {
         "zh": "在 Operit 原 QQ Bot 工具包基础上补齐官方 v2 API：撤回消息、Markdown/引用/输入态发送、群信息/机器人群状态/机器人资料查询。独立于原包，不修改原包。",
@@ -16,8 +16,7 @@
     "env": [
         { "name": "QQBOT_APP_ID", "description": { "zh": "QQ Bot AppID（复用原包环境变量）", "en": "QQ Bot AppID" }, "required": false },
         { "name": "QQBOT_APP_SECRET", "description": { "zh": "QQ Bot AppSecret（复用原包环境变量）", "en": "QQ Bot AppSecret" }, "required": false },
-        { "name": "QQBOT_PRO_SANDBOX", "description": { "zh": "是否使用沙箱 OpenAPI（true/false）", "en": "Use sandbox OpenAPI" }, "required": false },
-         { "name": "QQBOT_PRO_IMAGE_FOLDERS", "description": { "zh": "图片发送允许搜索的本地目录，逗号/换行/分号分隔", "en": "Local folders allowed for image sending" }, "required": false }
+        { "name": "QQBOT_PRO_SANDBOX", "description": { "zh": "是否使用沙箱 OpenAPI（true/false）", "en": "Use sandbox OpenAPI" }, "required": false }
     ],
     "tools": [
         {
@@ -41,8 +40,7 @@
             },
             "parameters": [
                 { "name": "openid", "description": { "zh": "单聊目标用户 openid", "en": "Target user openid" }, "type": "string", "required": false },
-                { "name": "group_openid", "description": { "zh": "目标群 openid；不填时从候选列表取", "en": "Target group openid; falls back to candidate list" }, "type": "string", "required": false },
-                 { "name": "target_index", "description": { "zh": "候选目标下标，默认 0", "en": "Candidate target index, default 0" }, "type": "number", "required": false },
+                { "name": "group_openid", "description": { "zh": "目标群 openid", "en": "Target group openid" }, "type": "string", "required": false },
                 { "name": "content", "description": { "zh": "文本内容（msg_type=0 时必填）", "en": "Text content" }, "type": "string", "required": false },
                 { "name": "markdown", "description": { "zh": "Markdown 内容（传此字段自动 msg_type=2，与 content 互斥）", "en": "Markdown content" }, "type": "string", "required": false },
                 { "name": "msg_type", "description": { "zh": "消息类型：0/2/6/7", "en": "Message type" }, "type": "number", "required": false },
@@ -85,34 +83,6 @@
             "parameters": [
                 { "name": "timeout_ms", "description": { "zh": "请求超时毫秒数（默认 20000）", "en": "Timeout in ms" }, "type": "number", "required": false }
             ]
-        }
-        {
-            "name": "qqbot_pro_send_image",
-            "description": {
-                "zh": "向用户或群发送一张图片（C2C 或群聊）。支持本地文件路径或网络图片 URL，自动素材上传并以富媒体消息（msg_type=7）发送。目标可从环境变量候选列表选取。",
-                "en": "Send an image to a user or group. Local path or remote URL, auto upload, rich media (msg_type=7). Target may be picked from env candidate list."
-            },
-            "parameters": [
-                { "name": "openid", "description": { "zh": "目标用户 openid（私聊）", "en": "Target user openid (C2C)" }, "type": "string", "required": false },
-                { "name": "group_openid", "description": { "zh": "目标群 group_openid（群聊）", "en": "Target group_openid (group)" }, "type": "string", "required": false },
-                { "name": "file_path", "description": { "zh": "本地图片路径（与 image_url 二选一）", "en": "Local image file path" }, "type": "string", "required": false },
-                { "name": "image_url", "description": { "zh": "网络图片 URL（与 file_path 二选一，自动下载后上传）", "en": "Remote image URL, auto-downloaded" }, "type": "string", "required": false },
-                { "name": "file_name", "description": { "zh": "上传文件名（可选）", "en": "Upload file name (optional)" }, "type": "string", "required": false },
-                { "name": "file_type", "description": { "zh": "素材类型，默认 1（图片）", "en": "Media type, default 1 (image)" }, "type": "number", "required": false },
-                { "name": "target_index", "description": { "zh": "从候选列表选目标时的下标，默认 0", "en": "Candidate list index, default 0" }, "type": "number", "required": false },
-                { "name": "msg_id", "description": { "zh": "可选：要回复的原消息 ID", "en": "Source message ID" }, "type": "string", "required": false },
-                { "name": "event_id", "description": { "zh": "可选：要回复的事件 ID", "en": "Source event ID" }, "type": "string", "required": false },
-                { "name": "msg_seq", "description": { "zh": "回复序号，默认 1", "en": "Reply sequence, default 1" }, "type": "number", "required": false },
-                { "name": "timeout_ms", "description": { "zh": "请求超时毫秒数（默认 20000）", "en": "Timeout in ms, default 20000" }, "type": "number", "required": false }
-            ]
-        },
-        {
-            "name": "qqbot_pro_list_targets",
-            "description": {
-                "zh": "列出 AI 主动发送消息的候选目标（来自环境变量 QQBOT_PRO_TARGET_OPENIDS / QQBOT_PRO_TARGET_GROUP_OPENIDS）。工作流中 AI 可用它查看可发送的个人和群，再调用 qqbot_pro_send / qqbot_pro_send_image 主动发消息。",
-                "en": "List AI proactive-send candidate targets from env vars. Use then call qqbot_pro_send / qqbot_pro_send_image."
-            },
-            "parameters": []
         }
     ]
 }
@@ -158,10 +128,9 @@ async function qqbot_pro_recall(params) {
 
 async function qqbot_pro_send(params) {
     try {
-        const scene = core.asText(params.group_openid).trim() ? "group" : "c2c";
-        const target = core.resolveSendTarget(scene, params);
-        const openid = scene === "c2c" ? target.targetId : "";
-        const groupOpenid = scene === "group" ? target.targetId : "";
+        const openid = core.asText(params.openid).trim();
+        const groupOpenid = core.asText(params.group_openid).trim();
+        if (!openid && !groupOpenid) throw new Error("Need openid (C2C) or group_openid (group)");
         const snapshot = core.requireConfiguredSnapshot();
         const timeoutMs = core.resolveTimeoutMs(params.timeout_ms);
         const body = core.buildSendBody(params);
@@ -169,6 +138,7 @@ async function qqbot_pro_send(params) {
             throw new Error("Nothing to send: provide content, markdown, input_notify, or media");
         }
         let path;
+        let scene;
         if (groupOpenid) {
             path = `/v2/groups/${encodeURIComponent(groupOpenid)}/messages`;
             scene = "group";
@@ -180,7 +150,7 @@ async function qqbot_pro_send(params) {
         if (!response.success) {
             throw new Error(core.firstNonBlank(core.asText(response.json.message), `HTTP ${response.statusCode}`));
         }
-        return buildResult({ scene, openid, groupOpenid, fromCandidate: target.fromCandidate, requestBody: body, httpStatus: response.statusCode, response: response.json });
+        return buildResult({ scene, openid, groupOpenid, requestBody: body, httpStatus: response.statusCode, response: response.json });
     } catch (error) {
         return buildError(error);
     }
@@ -234,62 +204,10 @@ async function qqbot_pro_me(params) {
     }
 }
 
-async function qqbot_pro_send_image(params) {
-    try {
-        const filePath = core.asText(params.file_path).trim();
-        const imageUrl = core.asText(params.image_url).trim();
-        if (!filePath && !imageUrl) {
-            throw new Error("Missing param: file_path or image_url");
-        }
-        const scene = core.asText(params.group_openid).trim() ? "group" : "c2c";
-        const target = core.resolveSendTarget(scene, params);
-        const snapshot = core.requireConfiguredSnapshot();
-        const timeoutMs = core.resolveTimeoutMs(params.timeout_ms);
-        let localPath = filePath;
-        let fileName = "";
-        if (!localPath && imageUrl) {
-            const dir = "/sdcard/Download/Operit/cleanOnExit/qqbot_upload";
-            await Tools.Files.mkdir(dir, true, "android");
-            fileName = core.asText(String(imageUrl).split("/").pop() || "image.jpg").split("?")[0];
-            localPath = `${dir}/${Date.now()}_${fileName}`;
-            await Tools.Files.download(imageUrl, localPath, "android", {});
-        }
-        if (!fileName) {
-            fileName = String(localPath).split("/").pop() || "image.jpg";
-        }
-        const uploaded = await core.uploadMediaFile(snapshot, scene, target.targetId, localPath, core.asText(params.file_name).trim() || fileName, Number(params.file_type) || 1, timeoutMs);
-        const body = core.buildSendMediaBody({
-            file_info: uploaded.fileInfo,
-            msg_id: params.msg_id,
-            event_id: params.event_id,
-            msg_seq: params.msg_seq
-        });
-        const path = scene === "group"
-            ? `/v2/groups/${encodeURIComponent(target.targetId)}/messages`
-            : `/v2/users/${encodeURIComponent(target.targetId)}/messages`;
-        const response = await core.openApiRequest(snapshot, path, "POST", body, timeoutMs);
-        if (!response.success) {
-            throw new Error(core.firstNonBlank(core.asText(response.json.message), `HTTP ${response.statusCode}`));
-        }
-        return buildResult({ scene, targetId: target.targetId, fromCandidate: target.fromCandidate, filePath: localPath, fileInfo: uploaded.fileInfo, httpStatus: response.statusCode, response: response.json });
-    } catch (error) {
-        return buildError(error);
-    }
-}
-async function qqbot_pro_list_targets() {
-    try {
-        const candidates = core.readTargetCandidates();
-        return buildResult({ candidates, env: { openids: "QQBOT_PRO_TARGET_OPENIDS", groupOpenids: "QQBOT_PRO_TARGET_GROUP_OPENIDS" } });
-    } catch (error) {
-        return buildError(error);
-    }
-}
 module.exports = {
     qqbot_pro_recall,
     qqbot_pro_send,
     qqbot_pro_group_info,
     qqbot_pro_bot_state,
-    qqbot_pro_me,
-    qqbot_pro_send_image,
-    qqbot_pro_list_targets
+    qqbot_pro_me
 };
