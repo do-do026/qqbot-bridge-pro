@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro hotfix: @ mention misdetect fix (T039) + keyword_or_at trigger + sync.sh src2dist (T040) 2026-08-08"
+COMMIT_MSG = "qqbot-pro: T041/T042 fixes (group waifu empty reply, @ member_openid cross-check) + G7 group member binding blueprint + docs 2026-08-08"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
