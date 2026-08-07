@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### T039 @消息误杀修复 + keyword_or_at 关键词触发（01:5x-02:0x）
+- **根因**：QQ「接收所有消息」全量模式下 @ 消息以 `GROUP_MESSAGE_CREATE` 推送、@ 标记在 `mentions`；Gateway 未透传 mentions + 桥只认 AT 事件类型 → @ 消息被 `group_message_not_at` 误杀
+- **修复**：Gateway 透传 mentions；`isGroupAtEventType` 加 mentions 兜底（id/user_openid/member_openid 匹配机器人）
+- **新功能**：`groupMessageMode` 增加 `keyword_or_at`；新增 `groupKeywords`（数组/JSON/逗号分隔，env `QQBOT_PRO_GROUP_KEYWORDS`）；命中关键词也触发聚合
+- **T040**：sync.sh 增加 src→dist 同步（曾因只改 src 烧录旧代码）
+- 聚合窗口已按用户要求调为 **5 秒**；测试 31 项全过；已烧录生效（keyword_or_at + 关键词[渡渡,dodo,渡渡渡渡]）
+- 文档：TROUBLESHOOTING T039/T040；本 CHANGELOG；GitHub 推送
+
 ### qqbot-pro v0.3.0 合并后首轮真机修复（01:1x-01:5x）
 - **T037 Gateway 资源解出修复**：`ToolPkg.readResource` 第二参数应为 `outputFileName` 而非完整路径（返回值是临时路径）；新增 `ensureGatewayScriptAsync()` 统一解资源+落盘+兜底，两处启动逻辑改调；顺带清理合并残留（`--source 'qqbot_bridge_pro'` / executorKey / METADATA name）
 - **验证**：删除 STATE_DIR 的 py 后启动自动解出 37759B 并 connected=true ✅
