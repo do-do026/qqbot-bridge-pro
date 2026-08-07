@@ -306,4 +306,32 @@ await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
 
 **关联**：T039（mentions 识别引入）、G7（群成员身份绑定，可学习机器人 member_openid 做到精确识别）。
 
+---
+
+### T043：Gateway 资源文件只解出一次，包内更新永不生效（旧 py 永驻）
+
+**现象**：T039 给 `qqbot_pro_gateway.py` 加了 mentions 透传并烧录，但实测事件对象仍无 mentions 字段（只在 rawPayload 里）；`grep mentions STATE_DIR/qqbot_pro_gateway.py` 无结果——STATE_DIR 里跑的还是 01:18 的旧 py。
+
+**根因**：`ensureGatewayScriptAsync` 只在目标文件**不存在**时才从包内解出；文件一旦存在就永远驻留。01:18 首次成功启动解出旧 py 后，后续所有包内 resources 更新（含 T039 mentions 透传）都未落盘 → Gateway 侧永远是旧逻辑。
+
+**修复**：
+1. 立即：手动 `cp package/resources/qqbot_pro_gateway.py → STATE_DIR` + 重启 Gateway。
+2. 防复发：`ensureGatewayScriptAsync` 改为**每次启动都从包内重新解出并覆盖**（readResource → copy 覆盖；失败才兜底 dev 路径；全失败且目标存在则保留旧文件）——包内资源始终是权威版本。
+
+**验证**：Gateway 重启后事件对象含 mentions；`@渡渡 (困困窝)` 成功触发聚合并回复（全链路闭环 2026-08-08 03:12）✅
+
+**关联**：T037（readResource 参数错误，同属资源解出链路）、T044（烧录后桥循环停止）。
+
+---
+
+### T044：debug_install_toolpkg 烧录后，运行中的桥循环被重置为停止
+
+**现象**：03:08 启动桥（running）→ 03:09 烧录 T043 → 用户发消息无响应；查桥状态 `running:false`，runtime startedAt 被还原为上一次 stop 的时间，Gateway 队列积压 1 条事件。
+
+**根因**：烧录触发子包重新加载，JS 运行时重建，内存里的 `autoReplyTimerId` 丢失；runtime 状态从持久化 store 恢复（= 上次 stop 的快照）→ 桥实际未运行，事件无人消费。
+
+**修复/规避**：**每次烧录后必须手动 `qqbot_pro_bridge_start` 重新拉起桥循环**（Gateway 是独立进程不受影响，但桥循环一定会被重置）。烧录后顺手验证：`qqbot_pro_bridge_status` 的 `runtime.running` 必须为 true。
+
+**关联**：T038（烧录重置子包状态）、T043（烧录后需要重启 Gateway/桥的完整 SOP）。
+
 **验证**：.toolpkg 导入后重启 Operit，侧边栏/工具箱是否出现"QQ Bot Bridge Pro"入口。
