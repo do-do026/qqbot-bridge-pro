@@ -1,55 +1,55 @@
 {
   "schema_version": 1,
-  "toolpkg_id": "com.operit.qqbot_bridge_pro",
-  "version": "1.0.0",
+  "toolpkg_id": "com.operit.qqbot_pro",
+  "version": "0.3.0",
   "main": "dist/main.js",
   "display_name": {
-    "zh": "QQ Bot Bridge Pro",
-    "en": "QQ Bot Bridge Pro"
+    "zh": "QQ Bot Pro 增强包",
+    "en": "QQ Bot Pro"
   },
   "description": {
-    "zh": "QQ Bot 桥接增强包：整合原 qqbot_bundle 全部能力 + qqbot-pro 增强能力。收消息（增强 Gateway 事件全放开）、发消息（文本/Markdown/引用/输入态/图片）、自动回复桥（QQ→Operit 指定对话→AI 回复→QQ，waifu 三句号切分）、AI 主动发送（候选列表）；保留官方单聊 stream_messages 的架构位置，当前未实现。独立安装，可顶替原包。",
-    "en": "QQ Bot Bridge Pro: merged capabilities of qqbot_bundle and qqbot-pro. Gateway receive, send (text/markdown/reference/input-notify/image), auto-reply bridge (QQ -> Operit chat -> AI reply -> QQ with waifu flush), AI proactive send (candidate list); reserves an architecture slot for C2C stream_messages (not implemented). Drop-in replacement for the original bundle."
+    "zh": "在 Operit 原 QQ Bot 工具包（com.operit.qqbot_bundle）基础上补齐官方 v2 API 能力的增强包。独立安装、独立配置，不修改原包。能力：撤回消息、Markdown/引用/输入态发送、群信息/机器人群状态/机器人资料查询、增强版 Gateway（事件全放开 + 按钮回调回应）、自动回复桥（QQ→Operit→AI→QQ，合并自 qqbot-bridge-pro v1.0.0：C2C 绑定/群聚合/上下文缓存/持久化恢复/waifu 切分）。",
+    "en": "An enhancement bundle over Operit's QQ Bot bundle, adding official v2 APIs. Independent install, does not modify the original bundle. Capabilities: recall, markdown/reference/input-notify sending, group info / bot state / bot profile queries, enhanced Gateway with all events, and auto-reply bridge (QQ→Operit→AI→QQ, merged from qqbot-bridge-pro v1.0.0)."
   },
   "enabled_by_default": true,
   "subpackages": [
     {
-      "id": "qqbot_bridge_pro_basic",
+      "id": "qqbot_pro_basic",
       "entry": "dist/packages/qqbot_pro_basic.js",
       "enabled_by_default": true,
       "display_name": {
-        "zh": "Bridge Pro 基础增强",
-        "en": "Bridge Pro Basic"
+        "zh": "QQ Bot Pro 基础增强",
+        "en": "QQ Bot Pro Basic"
       },
       "description": {
-        "zh": "撤回、文本/Markdown/引用/输入态发送、图片发送、群信息/群状态/机器人资料查询、AI 主动发送候选列表",
-        "en": "Recall, send (text/markdown/reference/input-notify), image send, group info / bot state / profile queries, AI proactive target list"
+        "zh": "撤回消息、Markdown/引用/输入态发送、群信息/群状态/机器人资料查询",
+        "en": "Recall, markdown/reference/input-notify sending, group info / bot state / profile queries"
       }
     },
     {
-      "id": "qqbot_bridge_pro_gateway",
+      "id": "qqbot_pro_gateway",
       "entry": "dist/packages/qqbot_pro_gateway.js",
       "enabled_by_default": true,
       "display_name": {
-        "zh": "Bridge Pro 增强版 Gateway",
-        "en": "Bridge Pro Enhanced Gateway"
+        "zh": "QQ Bot Pro 增强版 Gateway",
+        "en": "QQ Bot Pro Enhanced Gateway"
       },
       "description": {
-        "zh": "事件全放开 Gateway（含按钮回调 INTERACTION_CREATE、成员事件），独立端口 32146，队列读取/清空，互动回应",
-        "en": "Enhanced Gateway with all events, port 32146, event queue, interaction respond"
+        "zh": "事件全放开 Gateway（含按钮回调），独立端口 32146，与原包二选一",
+        "en": "Enhanced Gateway with all events, port 32146, exclusive with original"
       }
     },
     {
-      "id": "qqbot_bridge_pro_bridge",
+      "id": "qqbot_pro_bridge",
       "entry": "dist/packages/qqbot_pro_bridge.js",
       "enabled_by_default": true,
       "display_name": {
-        "zh": "Bridge Pro 自动回复桥",
-        "en": "Bridge Pro Auto Reply"
+        "zh": "QQ Bot Pro 自动回复桥",
+        "en": "QQ Bot Pro Auto Reply"
       },
       "description": {
-        "zh": "QQ→Operit 对话→QQ 自动回复桥：轮询消息队列，桥接 Operit AI，waifu 三句号切分防消息限制，支持绑定指定对话/角色卡/环境变量",
-        "en": "QQ -> Operit chat -> QQ auto-reply bridge with waifu sentence flush, pinned chat and character card support"
+        "zh": "QQ 消息桥入 Operit 对话并回发 AI 回复（合并自 qqbot-bridge-pro v1.0.0）。C2C 按 openid 分对话/固定绑定、群按 group_openid 聚合、上下文环形缓存与当天恢复、并发 flush、waifu 切分、角色卡与 env 配置。",
+        "en": "Bridge QQ messages into Operit chats and send AI replies back (merged from qqbot-bridge-pro v1.0.0). C2C per-openid chats/fixed bindings, group aggregation per group_openid, context ring cache with same-day recovery, concurrent flush, waifu flush, character card and env config."
       }
     }
   ],
