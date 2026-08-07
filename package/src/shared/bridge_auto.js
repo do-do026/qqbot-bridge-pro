@@ -22,6 +22,7 @@ module.exports = {
         trimGroupContextCacheGlobal,
         isGroupAtEventType,
         extractAtTargetIds,
+        resolveMemberLabel,
         buildEventKey,
         serializeCachedEvent,
         restoreGroupRuntimeStateAsync,
@@ -958,6 +959,36 @@ function shortOpenId(openid) {
     }
     return text.length <= 4 ? text : text.slice(-4);
 }
+/**
+ * G7 群成员身份绑定：返回成员在上下文中的显示标签。
+ * 匹配规则：memberOpenid 相等；若绑定带 groupOpenid，需群也匹配（留空=全局生效）。
+ * 未命中 → QQ+后四位。
+ */
+function resolveMemberLabel(config, memberOpenId, groupOpenId) {
+    const bindings = Array.isArray(config && config.groupMemberBindings) ? config.groupMemberBindings : [];
+    const targetMember = (0, core.asText)(memberOpenId).trim();
+    const targetGroup = (0, core.asText)(groupOpenId).trim();
+    if (bindings.length > 0 && targetMember) {
+        for (let index = 0; index < bindings.length; index += 1) {
+            const binding = bindings[index];
+            if (!core.isObject(binding)) {
+                continue;
+            }
+            if ((0, core.asText)(binding.memberOpenid).trim() !== targetMember) {
+                continue;
+            }
+            const bindingGroup = (0, core.asText)(binding.groupOpenid).trim();
+            if (bindingGroup && bindingGroup !== targetGroup) {
+                continue;
+            }
+            const title = (0, core.asText)(binding.title).trim();
+            if (title) {
+                return title;
+            }
+        }
+    }
+    return `QQ${shortOpenId(targetMember)}`;
+}
 async function resolveGroupNicknameAsync(snapshot, groupOpenId, memberOpenId) {
     const cacheKey = `${groupOpenId}|${memberOpenId}`;
     const cached = groupNicknameCache.get(cacheKey);
@@ -980,13 +1011,13 @@ async function buildGroupAggregateMessageAsync(config, snapshot, events) {
     for (let index = 0; index < events.length; index += 1) {
         const event = events[index];
         const memberOpenId = (0, core.firstNonBlank)((0, core.asText)(event.userOpenId).trim(), (0, core.asText)(event.authorId).trim());
-        let label = "";
+        // G7：绑定名优先；未绑定回退 QQ+后四位；群昵称开启时再尝试昵称覆盖
+        let label = resolveMemberLabel(config, memberOpenId, (0, core.asText)(event.groupOpenId).trim());
         if (config.groupNicknameEnabled && memberOpenId && (0, core.asText)(event.groupOpenId).trim()) {
             const nickname = await resolveGroupNicknameAsync(snapshot, (0, core.asText)(event.groupOpenId).trim(), memberOpenId);
-            label = nickname || `QQ${shortOpenId(memberOpenId)}`;
-        }
-        else {
-            label = `QQ${shortOpenId(memberOpenId)}`;
+            if (nickname) {
+                label = nickname;
+            }
         }
         const content = (0, core.asText)(event.content).trim();
         const attachmentTags = await materializeQQInboundAttachmentsAsync(event);
@@ -1759,6 +1790,9 @@ async function qqbot_auto_reply_configure(params = {}) {
         if ((0, core.hasOwn)(params, "group_keywords")) {
             patch.groupKeywords = bridgeConfig.normalizeGroupKeywords(params.group_keywords);
         }
+        if ((0, core.hasOwn)(params, "group_member_bindings")) {
+            patch.groupMemberBindings = bridgeConfig.normalizeGroupMemberBindings(params.group_member_bindings);
+        }
         if ((0, core.hasOwn)(params, "group_context_mode")) {
             patch.groupContextMode = (0, core.asText)(params.group_context_mode).trim().toLowerCase();
         }
@@ -1986,7 +2020,7 @@ async function qqbot_pro_group_context(params = {}) {
         eventKey: buildEventKey(ev),
         eventType: (0, core.asText)(ev.eventType).trim(),
         isAtEvent: isGroupAtEventType((0, core.asText)(ev.eventType)),
-        member: `QQ${shortOpenId((0, core.firstNonBlank)((0, core.asText)(ev.userOpenId).trim(), (0, core.asText)(ev.authorId).trim()))}`,
+        member: resolveMemberLabel(config, (0, core.firstNonBlank)((0, core.asText)(ev.userOpenId).trim(), (0, core.asText)(ev.authorId).trim()), (0, core.asText)(ev.groupOpenId).trim()),
         sentAt: (0, core.asText)(ev.timestamp).trim(),
         receivedAt: (0, core.asText)(ev.receivedAt).trim(),
         content: (0, core.asText)(ev.content).trim()
