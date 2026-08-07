@@ -122,9 +122,9 @@ function getServiceLogPath() {
 async function ensureGatewayScriptAsync() {
     await Tools.Files.mkdir(STATE_DIR, true, "android");
     const targetPath = `${STATE_DIR}/${SERVICE_FILE}`;
-    const targetExists = await Tools.Files.exists(targetPath, "android");
-    if (targetExists && targetExists.exists) return;
-
+    // T043（2026-08-08）：不能只按“文件存在”就跳过——旧资源文件会永远驻留，
+    // 导致包内 resources 的新增字段（如 mentions 透传）在 Gateway 侧永不生效。
+    // 改为每次启动都从包内重新解出并覆盖，包内资源始终是权威版本。
     let copied = false;
     try {
         const tmpPath = await ToolPkg.readResource(RESOURCE_KEY, SERVICE_FILE);
@@ -150,6 +150,8 @@ async function ensureGatewayScriptAsync() {
         }
     }
     if (!copied) {
+        const targetExists = await Tools.Files.exists(targetPath, "android");
+        if (targetExists && targetExists.exists) return;
         throw new Error(`Gateway resource ${SERVICE_FILE} is missing and could not be extracted (readResource unavailable and no dev fallback found)`);
     }
 }
