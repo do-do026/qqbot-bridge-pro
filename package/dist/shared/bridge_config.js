@@ -143,9 +143,15 @@ const FIELD_DEFS = {
     groupMessageMode: {
         type: "enum",
         default: "at_only",
-        values: ["at_only", "all"],
+        values: ["at_only", "keyword_or_at", "all"],
         env: "QQBOT_PRO_GROUP_MESSAGE_MODE",
-        desc: "群消息桥接模式：at_only = 只让 @Bot 消息触发 AI；all = 全部群消息触发"
+        desc: "群消息桥接模式：at_only = 只让 @Bot 消息触发 AI；keyword_or_at = @Bot 或命中 groupKeywords 关键词触发；all = 全部群消息触发"
+    },
+    groupKeywords: {
+        type: "array",
+        default: [],
+        env: "QQBOT_PRO_GROUP_KEYWORDS",
+        desc: "群关键词列表：keyword_or_at 模式下普通群消息命中任一关键词即视为触发（匹配 content 子串，不区分大小写）"
     },
     groupContextMode: {
         type: "enum",
@@ -225,6 +231,38 @@ const LEGACY_MIGRATIONS = [
         describe: (value) => `groupAggregateMaxItems=${value} → groupMaxItems=${value}（语义变更：桶满提前 flush → 单群安全保留上限）`
     }
 ];
+/**
+ * 归一化群关键词：支持数组、JSON 字符串、逗号/顿号分隔字符串 → string[]。
+ */
+function normalizeGroupKeywords(raw) {
+    let items = [];
+    if (Array.isArray(raw)) {
+        items = raw;
+    }
+    else if (typeof raw === "string" && core.asText(raw).trim()) {
+        const text = core.asText(raw).trim();
+        try {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) {
+                items = parsed;
+            }
+        }
+        catch (_error) {
+            // 非 JSON：按逗号/顿号/换行分隔
+            items = text.split(/[,，、\n]+/);
+        }
+    }
+    const result = [];
+    const seen = new Set();
+    for (let index = 0; index < items.length; index += 1) {
+        const keyword = core.asText(items[index]).trim();
+        if (keyword && !seen.has(keyword)) {
+            seen.add(keyword);
+            result.push(keyword);
+        }
+    }
+    return result;
+}
 
 function normalizeC2cFixedBindings(raw) {
     let items = [];
@@ -285,6 +323,9 @@ function parseFieldValue(fieldName, rawValue, fieldDef) {
         return core.asText(rawValue).trim();
     }
     if (type === "array") {
+        if (fieldName === "groupKeywords") {
+            return normalizeGroupKeywords(rawValue);
+        }
         return rawValue;
     }
     return rawValue;
@@ -307,6 +348,9 @@ function applyEnvFallback(fieldName, fieldDef) {
     }
     if (fieldDef.type === "boolean") {
         return core.toBoolean(envValue, false);
+    }
+    if (fieldDef.type === "array" && fieldName === "groupKeywords") {
+        return normalizeGroupKeywords(envValue);
     }
     return envValue.trim();
 }
@@ -427,6 +471,7 @@ module.exports = {
     FIELD_DEFS,
     LEGACY_MIGRATIONS,
     normalizeC2cFixedBindings,
+    normalizeGroupKeywords,
     normalizeBridgeConfig,
     buildDefaultBridgeConfig,
     listFieldNames,
