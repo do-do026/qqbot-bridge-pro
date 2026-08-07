@@ -101,6 +101,15 @@ function makeEvent(overrides) {
     const noMentionEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡渡渡——", mentions: [{ id: "USER1" }] });
     assert(bridgeAuto._internal.classifyEvent(cfg, noMentionEvent, svcWithBot).action === "context_only", "GROUP_MESSAGE_CREATE + mentions 不含机器人 → context_only");
 
+    // 2.7) T042：全量模式下机器人 member_openid ≠ botUserId，content <@xxx> + mentions 交叉验证
+    const atContentEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "<@D02B97AF5873726C3C793F3EC1ECF7B5> 两点也困困舔舔他", authorId: "USER_CC9F", mentions: [{ id: "USER_CC9F" }, { id: "D02B97AF5873726C3C793F3EC1ECF7B5" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, atContentEvent, svcWithBot).action === "process", "T042：content <@xxx> 且 @目标在 mentions、非自己 → process");
+    const selfAtEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "<@USER_CC9F> 自己@自己", authorId: "USER_CC9F", mentions: [{ id: "USER_CC9F" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, selfAtEvent, svcWithBot).action === "context_only", "T042：自己@自己 → context_only");
+    const atOtherEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "<@OTHER_USER> 晚上好", authorId: "USER_CC9F", mentions: [{ id: "OTHER_USER" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, atOtherEvent, svcWithBot).action === "process", "T042：@目标在 mentions（含群友）→ process（宽松识别，测试场景够用）");
+    assert(JSON.stringify(bridgeAuto._internal.extractAtTargetIds('<@AABB1122> 你好 <@CCDD3344>')) === '["AABB1122","CCDD3344"]', "extractAtTargetIds 提取多个 @目标");
+
     // 2.6) keyword_or_at 模式：关键词触发
     const kwCfg = { ...cfg, groupMessageMode: "keyword_or_at", groupKeywords: ["渡渡", "dodo"] };
     assert(bridgeAuto._internal.classifyEvent(kwCfg, makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡在吗" }), svcWithBot).action === "process", "keyword_or_at：命中关键词 → process");
