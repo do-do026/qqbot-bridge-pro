@@ -2,6 +2,13 @@
 
 ## 2026-08-08
 
+### G7 群成员身份绑定——最小版落地（02:29-02:33）
+- **需求确认**：初尘在群里的 id 可从消息 `author.id` 直接获取（CC9F593975D8C8F1E1EC72DD91305C63，与 C2C openid 相同）
+- **实现**：`groupMemberBindings` 配置（`[{memberOpenid, groupOpenid?, title}]`，env `QQBOT_PRO_GROUP_MEMBER_BINDINGS`）；聚合 attachment 与 `qqbot_pro_group_context` 查询的成员标签优先用绑定名，未绑定回退 QQ+后四位
+- **已配置**：初尘 CC9F59… → "初尘"（全局生效）
+- **测试**：新增 G7 用例 5 个（绑定命中/群限定/未绑定回退/归一化），**40/40 全过**；已烧录、桥已重启生效
+- 文档：CHANGELOG 本段；TROUBLESHOOTING 待补 T043；HANDOFF/STATUS 已同步 G7 实施状态
+
 ### 群链路全通 + 三连修复（02:13-02:24）
 - **开窗成功**：群 @/关键词触发 → 自动创建 `[QQ][群]` 对话窗 ✅
 - **T041**：群聚合 `waifu:true` + 无流式收集器 → AI 回复恒空；修复：群聚合显式 `waifu:false`（用自己的群聊 5 句切分）
