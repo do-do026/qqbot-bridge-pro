@@ -80,8 +80,8 @@
 */
 
 const core = require("../shared/core.js");
-const TOOLPKG_ID = "com.operit.qqbot_bridge_pro";
-const SERVICE_SESSION = "qqbot_bridge_pro_gateway";
+const TOOLPKG_ID = "com.operit.qqbot_pro";
+const SERVICE_SESSION = "qqbot_pro_gateway";
 const SERVICE_PORT = 32146;
 const RESOURCE_KEY = "qqbot_pro_gateway_py";
 const SERVICE_FILE = "qqbot_pro_gateway.py";
