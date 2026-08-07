@@ -563,6 +563,7 @@ class QQBotGatewayService:
             "userOpenId": user_openid,
             "groupOpenId": group_openid,
             "authorId": as_text(author.get("id")),
+            "mentions": data.get("mentions") if isinstance(data.get("mentions"), list) else None,
             "interactionType": data.get("type") if data.get("type") is not None else None,
             "interactionData": data.get("data") if is_object(data.get("data")) else None,
             "rawPayload": payload,
