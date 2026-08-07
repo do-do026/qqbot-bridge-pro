@@ -9,7 +9,7 @@
 "use strict";
 /* METADATA
 {
-    "name": "qqbot_bridge_pro_gateway",
+    "name": "qqbot_pro_gateway",
     "display_name": { "zh": "QQ Bot Pro 增强版 Gateway", "en": "QQ Bot Pro Enhanced Gateway" },
     "description": {
         "zh": "增强版 QQ Bot Gateway：事件全放开（含按钮回调 INTERACTION_CREATE、成员进出群等）。独立端口 32146。⚠️ 同 AppID 下与原包 Gateway 二选一运行。",
@@ -112,6 +112,48 @@ function getServiceLogPath() {
     return `${STATE_DIR}/gateway_service.log`;
 }
 
+/**
+ * 确保 Gateway Python 脚本就位：
+ * 1. readResource 的第二个参数是 outputFileName（不是完整路径），返回值是临时路径；
+ *    需要先解出到临时路径，再 copy 到 STATE_DIR。
+ * 2. 若 readResource 不可用（老宿主），兜底从开发目录复制。
+ * 3. 全部失败时抛出明确错误，避免 nohup 后 python3 找不到文件。
+ */
+async function ensureGatewayScriptAsync() {
+    await Tools.Files.mkdir(STATE_DIR, true, "android");
+    const targetPath = `${STATE_DIR}/${SERVICE_FILE}`;
+    const targetExists = await Tools.Files.exists(targetPath, "android");
+    if (targetExists && targetExists.exists) return;
+
+    let copied = false;
+    try {
+        const tmpPath = await ToolPkg.readResource(RESOURCE_KEY, SERVICE_FILE);
+        if (tmpPath) {
+            await Tools.Files.copy(tmpPath, targetPath, false, "android", "android");
+            copied = true;
+        }
+    } catch (error) {
+        // readResource 失败时走兜底
+    }
+    if (!copied) {
+        const devCandidates = [
+            "/sdcard/Download/qqbot-pro/package/resources/qqbot_pro_gateway.py",
+            "/sdcard/Download/Operit/dev_package/qqbot_pro/resources/qqbot_pro_gateway.py"
+        ];
+        for (const candidate of devCandidates) {
+            const exists = await Tools.Files.exists(candidate, "android");
+            if (exists && exists.exists) {
+                await Tools.Files.copy(candidate, targetPath, false, "android", "android");
+                copied = true;
+                break;
+            }
+        }
+    }
+    if (!copied) {
+        throw new Error(`Gateway resource ${SERVICE_FILE} is missing and could not be extracted (readResource unavailable and no dev fallback found)`);
+    }
+}
+
 async function readServiceLogTail(maxChars) {
     try {
         const exists = await Tools.Files.exists(getServiceLogPath(), "android");
@@ -170,11 +212,7 @@ async function qqbot_pro_gateway_start(params) {
         }
 
         // 准备资源文件
-        await Tools.Files.mkdir(STATE_DIR, true, "android");
-        const resourceExists = await Tools.Files.exists(`${STATE_DIR}/${SERVICE_FILE}`, "android");
-        if (!resourceExists || !resourceExists.exists) {
-            await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
-        }
+        await ensureGatewayScriptAsync();
 
         // 构造启动命令（复用原包思路：python3 后台运行）
         const scriptPath = `${STATE_DIR}/${SERVICE_FILE}`;
@@ -319,11 +357,7 @@ async function ensureGatewayStarted(options) {
     if (!restart && (await isServiceRunning())) {
         return await getGatewayStatusInternal();
     }
-    await Tools.Files.mkdir(STATE_DIR, true, "android");
-    const resourceExists = await Tools.Files.exists(`${STATE_DIR}/${SERVICE_FILE}`, "android");
-    if (!resourceExists || !resourceExists.exists) {
-        await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
-    }
+    await ensureGatewayScriptAsync();
     const scriptPath = `${STATE_DIR}/${SERVICE_FILE}`;
     const controlToken = `qqbot_pro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
     const intents = String((1 << 30) | (1 << 12) | (1 << 25) | (1 << 26));
@@ -333,7 +367,7 @@ async function ensureGatewayStarted(options) {
         "--app-id", `'${snapshot.appId}'`,
         "--app-secret", `'${snapshot.appSecret}'`,
         "--use-sandbox", snapshot.useSandbox ? "'true'" : "'false'",
-        "--source", "'qqbot_bridge_pro'",
+        "--source", "'qqbot_pro_auto'",
         "--package-version", `'${core.PACKAGE_VERSION}'`,
         "--intents", `'${intents}'`,
         "--control-token", `'${controlToken}'`,
@@ -341,7 +375,7 @@ async function ensureGatewayStarted(options) {
         `> '${getServiceLogPath()}' 2>&1 & echo $!`
     ].join(" ");
     await Tools.System.terminal.hiddenExec(command, {
-        executorKey: "qqbot_bridge_pro_gateway",
+        executorKey: "qqbot_pro_gateway",
         timeoutMs: Math.max(timeoutMs, 10000)
     });
     const deadline = Date.now() + timeoutMs;
