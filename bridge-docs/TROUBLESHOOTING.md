@@ -243,4 +243,35 @@ await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
 
 **关联**：T009（会话快照）、T027/T035（多包子包状态混乱）
 
+---
+
+### T039：QQ「接收所有消息」全量模式下，@ 消息以 GROUP_MESSAGE_CREATE 推送，@ 标记在 mentions——桥误杀 @ 触发
+
+**现象**：初尘在群里 @渡渡 + 发普通消息共 3 条，Gateway 日志显示三条**全是 `GROUP_MESSAGE_CREATE`**（无 `GROUP_AT_MESSAGE_CREATE`）；桥全部 `group_message_not_at` 跳过，@ 消息不触发 AI、不建群对话。
+
+**根因**（2026-08-08 对照官方文档确认）：
+1. QQ 官方「群消息（全量模式）」文档原文：*"当机器人开启了'接收所有消息'功能后，群里的每一条消息（不限于@机器人）都会推送此事件。各字段含义与 GROUP_AT_MESSAGE_CREATE 完全一致。"*——即：**@ 消息也会以 GROUP_MESSAGE_CREATE 推送，@ 标记在 `mentions` 数组里**。
+2. 我们的 `classifyEvent` 只认 `eventType === "GROUP_AT_MESSAGE_CREATE"`，且 Gateway 事件对象**未透传 mentions**（只在 rawPayload 里，桥读取时被 sanitize 掉）→ @ 消息被误判为普通消息。
+3. 官方 intents 也确认：`GROUP_AT_MESSAGE_CREATE` 属于 `GROUP_AND_C2C_EVENT (1<<25)`，我们的 intents 已含 1<<25（C2C 能收到即证明），所以**不是 intents 问题，是事件类型 + mentions 识别缺失**。
+
+**修复**：
+1. Gateway Python `build_event` 增加 `"mentions": data.get("mentions") if isinstance(data.get("mentions"), list) else None` 透传。
+2. `isGroupAtEventType(eventType, event, botUserId)` 增强：AT 类型直接 true；否则 GROUP_MESSAGE_CREATE 若 `mentions` 含机器人 id（id / user_openid / member_openid 任一匹配）→ 视为 @ 触发。
+3. 新增 **keyword_or_at 模式**（用户需求）：`groupMessageMode` 枚举扩展 `["at_only","keyword_or_at","all"]`，新增 `groupKeywords` 字段（数组/JSON/逗号顿号分隔，env `QQBOT_PRO_GROUP_KEYWORDS`）；keyword_or_at 下普通群消息命中关键词也触发。
+4. 冒烟测试新增 8 用例（mentions 识别 ×3、关键词 ×3、归一化 ×3），31 项全过。
+
+**验证**：待初尘在群里发"渡渡"或 @渡渡实测（管理端若未开 @事件，全量模式下 mentions 兜底也能触发）。
+
+---
+
+### T040：sync.sh 不同步 src → dist，烧录了旧代码（dist 漂移）
+
+**现象**：改完 `src/shared/bridge_auto.js` 等文件、跑 sync.sh、烧录后，工具描述仍是旧的（无 keyword_or_at / group_keywords）；解包安装产物 grep 无新代码。
+
+**根因**：`sync.sh` 只做「主目录 package → dev_package」整目录复制，**从不把 src 同步到 dist**（HANDOFF 一直说"改完 src 也要 cp 到 dist"，但脚本没做，人工容易漏）。测试直接用 src 所以全绿，烧录却用 dist → 旧代码上线。
+
+**修复**：sync.sh 增加步骤 0.5「src → dist 同步」（main.js / shared / packages / ui 下所有真实存在的 JS 文件），以后跑一次 sync.sh 即保证 src==dist==dev_package==安装包。
+
+**关联**：T037（readResource 参数错误）同属"改 src 忘 dist"类问题；建议后续做 src↔dist 一致性自动校验。
+
 **验证**：.toolpkg 导入后重启 Operit，侧边栏/工具箱是否出现"QQ Bot Bridge Pro"入口。
