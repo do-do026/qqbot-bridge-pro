@@ -278,6 +278,25 @@ QQ 官方提供 C2C `stream_messages`，Operit 也具备 HTTP 实现条件。但
 
 覆盖原 QQ Bot UI，并增加窗口、上下文三态、前后条数、容量、并发、replyTo/降级策略、Waifu 与桥接 Prompt 持久化选项。UI 只能调用统一配置服务，禁止直接写 config.json。
 
+#### Epic G7：群成员身份绑定与昵称（2026-08-08 初尘新需求）
+
+**背景**：群聚合上下文目前只显示 `[QQ后四位]` 或 openid，AI 认不出"这是谁"。初尘希望：**能把某个群成员 openid 绑定为"我"（初尘），其他群友保持代号**；昵称获取后续再评估（官方无稳定群成员昵称接口，成本高，见 §2.2）。
+
+**设计**：
+1. 新配置 `groupMemberBindings: [{ memberOpenid, groupOpenid?, title }]`（群成员 openid → 显示名）。
+   - `groupOpenid` 可选：留空表示全局绑定（所有群生效）；指定则只在该群生效。
+   - 未绑定的成员默认显示 `[QQ后四位]`（延续现有降级），不主动查昵称。
+2. 聚合上下文与 `qqbot_pro_group_context` 查询输出中，member 标签优先用绑定名。
+3. UI/API/env 均可维护（env 用 JSON 数组字符串）。
+4. 与 G3 replyTo 衔接：AI 点名回复时可使用绑定名，如 `replyTo` 协议中的成员标识。
+
+**实施点**：
+- bridge_config.js 加 `groupMemberBindings` 字段（array，校验 memberOpenid 唯一）。
+- bridge_auto.js：聚合 attachment 的发言人标签改用绑定名；`qqbot_pro_group_context` 输出同步。
+- 查询工具/聚合文本里保留原始 memberOpenid 供 replyTo 映射。
+
+**默认**：`[]`（不绑定时行为与现状一致，零侵入）。
+
 ### 12.7 实施顺序
 
 1. G0 配置 schema/迁移。
@@ -285,10 +304,11 @@ QQ 官方提供 C2C `stream_messages`，Operit 也具备 HTTP 实现条件。但
 3. G4 统一 chunker（可与 G1 并行，但合并前先统一测试）。
 4. G2 上下文查询。
 5. G3 replyTo/引用/过期降级。
-6. G5 临时 Prompt 探针与实现。
-7. 可靠性 Sprint：事务状态机、token 缓存、错误码/Trace ID、故障注入。
-8. G6 UI。
-9. 全链路验收、文档审计与发布。
+6. G7 群成员身份绑定（依赖 G1 上下文标签与 G3 的成员标识；可与 G3 并行收尾）。
+7. G5 临时 Prompt 探针与实现。
+8. 可靠性 Sprint：事务状态机、token 缓存、错误码/Trace ID、故障注入。
+9. G6 UI。
+10. 全链路验收、文档审计与发布。
 
 ### 12.8 新增技术债/屎山风险
 
@@ -298,6 +318,28 @@ QQ 官方提供 C2C `stream_messages`，Operit 也具备 HTTP 实现条件。但
 - 多群并发 flush 会并发调用同一个 Chat/Gateway/OpenAPI；需按 chatId 串行、跨 chat 有限并发，不能只做粗暴 Promise.all。
 - replyTo 控制协议与自然语言回复混合会解析脆弱；应有严格 schema、容错解析和纯文本降级。
 - 主动降级发送与被动回复频控不同，必须记录发送模式、错误码与平台 Trace ID。
+
+---
+
+## 13. 官方文档参考（2026-08-08 核对所用）
+
+| 主题 | 地址 |
+|---|---|
+| 官方文档总入口（API v2） | https://bot.q.qq.com/wiki/develop/api-v2/ |
+| 消息收发概述（收发场景/频控/时效/去重） | https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/overview.html |
+| 事件订阅与通知（Payload/WebSocket/Intents 位定义/权限） | https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html |
+| 群消息（全量模式 GROUP_MESSAGE_CREATE，含 mentions/事件体） | https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_message_create.html |
+| 群@机器人消息（GROUP_AT_MESSAGE_CREATE） | https://bot.q.qq.com/wiki/develop/api-v2/autogen/event/group_at_message_create.html |
+| 发送群聊消息 | https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html |
+| 撤回群聊消息 | https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages_message_id.delete.html |
+| Agent 接入文档 | https://bot.q.qq.com/wiki/agent-qqbot/ |
+
+**关键结论速查**：
+- Intents：`GROUP_AND_C2C_EVENT (1<<25)` 含 C2C_MESSAGE_CREATE / GROUP_AT_MESSAGE_CREATE / FRIEND_* / GROUP_ADD_ROBOT 等；`INTERACTION (1<<26)`；`PUBLIC_GUILD_MESSAGES (1<<30)` 频道公域。特殊事件需管理端申请权限，无权限时 WS 不报错但收不到。
+- 群聊接收事件两种：`GROUP_AT_MESSAGE_CREATE`（@机器人）与 `GROUP_MESSAGE_CREATE`（开启"接收所有消息"后群里每条消息都推，字段与 AT 完全一致，@ 标记在 `mentions`）。
+- 被动回复时效：单聊 60 分钟/4 次，群聊 5 分钟/5 次（递增 msg_seq 可多次回复）。
+- 消息去重：相同 msg_id 可能多次推送，需结合 msg_seq 去重。
+- 主动消息受用户侧开关与频控限制（T027/B1 相关）。
 - Prompt Finalize Hook 是全局 Hook；若不建立 turn token/chatId 白名单，可能污染普通聊天，是高风险实现点。
 - 配置字段继续堆在 `bridge_auto.js` 会变成 God Object；应拆分 config、router、aggregate_store、context_store、reply_selector、chunker、sender。
 - src/dist 手工复制仍是流程债；至少让 sync.sh 校验 hash，长期应建立编译/生成流程。
