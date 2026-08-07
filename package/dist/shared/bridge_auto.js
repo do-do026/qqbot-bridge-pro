@@ -21,6 +21,7 @@ module.exports = {
         pushToGroupContextCache,
         trimGroupContextCacheGlobal,
         isGroupAtEventType,
+        extractAtTargetIds,
         buildEventKey,
         serializeCachedEvent,
         restoreGroupRuntimeStateAsync,
@@ -155,6 +156,18 @@ function serializeCachedEvent(event) {
         replyHint: (0, core.isObject)(event.replyHint) ? JSON.parse(JSON.stringify(event.replyHint)) : undefined
     };
 }
+function extractAtTargetIds(content) {
+    const text = (0, core.asText)(content);
+    const matches = text.match(/<@([0-9A-Za-z_-]+)>/g) || [];
+    const result = [];
+    for (let index = 0; index < matches.length; index += 1) {
+        const id = matches[index].replace(/^<@/, "").replace(/>$/, "").trim();
+        if (id) {
+            result.push(id);
+        }
+    }
+    return result;
+}
 function isGroupAtEventType(eventType, event, botUserId) {
     const text = (0, core.asText)(eventType).trim().toUpperCase();
     if (text === "GROUP_AT_MESSAGE_CREATE" || text.includes("AT_MESSAGE")) {
@@ -166,7 +179,7 @@ function isGroupAtEventType(eventType, event, botUserId) {
     const mentions = Array.isArray(event && event.mentions) ? event.mentions : [];
     const botId = (0, core.asText)(botUserId).trim();
     if (mentions.length > 0 && botId) {
-        return mentions.some((user) => {
+        const mentionMatchesBot = mentions.some((user) => {
             if (!core.isObject(user)) {
                 return false;
             }
@@ -177,6 +190,38 @@ function isGroupAtEventType(eventType, event, botUserId) {
             ];
             return candidateIds.some((candidate) => candidate && candidate === botId);
         });
+        if (mentionMatchesBot) {
+            return true;
+        }
+    }
+    // T042（2026-08-08）：全量模式下机器人在群里的 member_openid ≠ botUserId（全局 user id），
+    // mentions 直接比对会漏判。兜底：提取 content 里的 <@xxx> 目标，
+    // 若 @ 目标出现在 mentions（官方“消息中@的用户列表”）且不是发送者自己 → 视为 @ 触发。
+    const atTargets = extractAtTargetIds(event && event.content);
+    const authorId = (0, core.asText)(event && event.authorId).trim();
+    if (atTargets.length > 0 && mentions.length > 0) {
+        const mentionIds = [];
+        for (let index = 0; index < mentions.length; index += 1) {
+            const user = mentions[index];
+            if (!core.isObject(user)) {
+                continue;
+            }
+            const ids = [
+                (0, core.asText)(user.id).trim(),
+                (0, core.asText)(user.user_openid).trim(),
+                (0, core.asText)(user.member_openid).trim()
+            ];
+            for (let j = 0; j < ids.length; j += 1) {
+                if (ids[j]) {
+                    mentionIds.push(ids[j]);
+                }
+            }
+        }
+        const atMentioned = atTargets.some((target) => mentionIds.includes(target));
+        const selfAt = atTargets.some((target) => target === authorId);
+        if (atMentioned && !selfAt) {
+            return true;
+        }
     }
     return false;
 }
@@ -810,7 +855,7 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
     for (let attempt = 1; attempt <= maxEmptyRetries; attempt += 1) {
         try {
             sendResult = await Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
-                waifu: config.waifu,
+                waifu: (0, core.hasOwn)(options, "waifu") ? options.waifu : config.waifu,
                 persist_turn: true,
                 notify_reply: false,
                 hide_user_message: false,
@@ -1027,11 +1072,14 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
     };
     const userMessage = [staleMark + aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
     // 群聚合场景（Epic G0）：AI 生成超时用 groupAiTimeoutMs、单次尝试；超时抛 group_ai_timeout。
+    // waifu:false —— 群聚合有自己的群聊 5 句切分（sendReplyChunksToQQAsync），
+    // 且 waifu 流式需要 onIntermediateResult 收集器，群聚合未传收集器会导致 aiResponse 为空（T041）。
     const generated = await generateAiReplyAsync(config, aggregateEvent, aggregateEventKey, undefined, {
         userMessage,
         scene: "group",
         aiTimeoutMs: config.groupAiTimeoutMs,
-        maxEmptyRetries: 1
+        maxEmptyRetries: 1,
+        waifu: false
     });
     const aiResponse = (0, core.asText)(generated.aiResponse).trim();
     // 锚点时效安全阀（Epic G0 提前量）：QQ 群被动回复约 5 分钟时效，预留 60s 安全边界。
