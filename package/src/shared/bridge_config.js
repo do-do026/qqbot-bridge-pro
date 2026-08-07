@@ -153,6 +153,12 @@ const FIELD_DEFS = {
         env: "QQBOT_PRO_GROUP_KEYWORDS",
         desc: "群关键词列表：keyword_or_at 模式下普通群消息命中任一关键词即视为触发（匹配 content 子串，不区分大小写）"
     },
+    groupMemberBindings: {
+        type: "array",
+        default: [],
+        env: "QQBOT_PRO_GROUP_MEMBER_BINDINGS",
+        desc: "群成员身份绑定（G7）：[{memberOpenid, groupOpenid?, title}]；聚合/查询上下文中该成员的标签显示为 title，未绑定显示 QQ+后四位"
+    },
     groupContextMode: {
         type: "enum",
         default: "off",
@@ -264,6 +270,46 @@ function normalizeGroupKeywords(raw) {
     return result;
 }
 
+/**
+ * 归一化群成员绑定（G7）：支持数组、JSON 字符串 → [{memberOpenid, groupOpenid?, title}]。
+ * memberOpenid 唯一（同 openid 重复保留最后一条）。
+ */
+function normalizeGroupMemberBindings(raw) {
+    let items = [];
+    if (Array.isArray(raw)) {
+        items = raw;
+    }
+    else if (typeof raw === "string" && core.asText(raw).trim()) {
+        try {
+            const parsed = JSON.parse(core.asText(raw));
+            if (Array.isArray(parsed)) {
+                items = parsed;
+            }
+        }
+        catch (_error) { }
+    }
+    const result = [];
+    const seen = new Set();
+    for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        if (!core.isObject(item)) {
+            continue;
+        }
+        const memberOpenid = core.asText(item.memberOpenid || item.member_openid).trim();
+        const title = core.asText(item.title).trim();
+        if (!memberOpenid || !title || seen.has(memberOpenid)) {
+            continue;
+        }
+        seen.add(memberOpenid);
+        result.push({
+            memberOpenid,
+            groupOpenid: core.asText(item.groupOpenid || item.group_openid).trim(),
+            title
+        });
+    }
+    return result;
+}
+
 function normalizeC2cFixedBindings(raw) {
     let items = [];
     if (Array.isArray(raw)) {
@@ -326,6 +372,9 @@ function parseFieldValue(fieldName, rawValue, fieldDef) {
         if (fieldName === "groupKeywords") {
             return normalizeGroupKeywords(rawValue);
         }
+        if (fieldName === "groupMemberBindings") {
+            return normalizeGroupMemberBindings(rawValue);
+        }
         return rawValue;
     }
     return rawValue;
@@ -351,6 +400,9 @@ function applyEnvFallback(fieldName, fieldDef) {
     }
     if (fieldDef.type === "array" && fieldName === "groupKeywords") {
         return normalizeGroupKeywords(envValue);
+    }
+    if (fieldDef.type === "array" && fieldName === "groupMemberBindings") {
+        return normalizeGroupMemberBindings(envValue);
     }
     return envValue.trim();
 }
@@ -472,6 +524,7 @@ module.exports = {
     LEGACY_MIGRATIONS,
     normalizeC2cFixedBindings,
     normalizeGroupKeywords,
+    normalizeGroupMemberBindings,
     normalizeBridgeConfig,
     buildDefaultBridgeConfig,
     listFieldNames,
