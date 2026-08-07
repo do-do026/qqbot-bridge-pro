@@ -1,8 +1,17 @@
 # qqbot-pro 冷启动接续文档（HANDOFF）
 
 > 用途：新窗口 AI 接续本工程的唯一入口。读完本文件 + 三个链接，即可独立工作，无需初尘转述。
-> 更新时间：2026-08-08 01:05
-> 状态：v0.3.0（合并 qqbot-bridge-pro v1.0.0 完整桥接能力），已重新打包安装待真机验证
+> 更新时间：2026-08-08 01:25
+> 状态：v0.3.0（合并 qqbot-bridge-pro v1.0.0 完整桥接能力），已重新打包安装，Gateway 资源解出 bug（T037）已修复并全链路恢复运行
+
+---
+
+## 0.5. 当前运行状态（2026-08-08 01:2x 快照）
+
+- **增强版 Gateway**：running + connected（botUsername 渡渡，AppID 1904028946，端口 32146）✅
+- **自动回复桥**：running，idle 3s 轮询 ✅；C2C 绑定初尘（41712e3a）、proactive 目标 CC9F59…、群聚合 60s at_only、waifu 单聊3/群5、群上下文 off
+- **本次修复**：T037（readResource 参数错误 → `ensureGatewayScriptAsync` 统一解资源）、T038（烧录后子包状态重置 → set_sandbox_package_enabled）
+- **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用（同 AppID 互踢 + 双处理）；C2C 绑定 41712e3a（flash 角色卡）勿动，语气问题初尘排查中
 
 ---
 
