@@ -13,16 +13,33 @@ function logStartup(message) {
 function registerToolPkg() {
     logStartup("registerToolPkg start");
 
-    // NOTE(T16): 宿主对含 compose_dsl UI 模块的 ToolPkg 热烧录仍有 bug（container did not appear）。
-    // 2026-08-06 04:20 二次实测复现 → 保持注释，待宿主修复或走正常导入路径（.toolpkg 导入）。
-    // const qqbotSettingsScreen = require("./ui/qqbot_settings/index.ui.js").default;
-    // ToolPkg.registerToolboxUiModule({
-    //     id: "qqbot_bridge_pro_settings",
-    //     runtime: "compose_dsl",
-    //     screen: qqbotSettingsScreen,
-    //     params: {},
-    //     title: { zh: "QQ Bot Bridge Pro 设置", en: "QQ Bot Bridge Pro Settings" }
-    // });
+    // NOTE(T16→T036): 外部 ToolPkg 的设置页 UI 应使用 registerUiRoute + registerNavigationEntry
+    // （参考成功案例 com.operit.mood_panel），而非内置包专用的 registerToolboxUiModule。
+    // screen 传包内相对路径字符串，由宿主加载；保留 try-catch，UI 失败不拖垮工具/hooks。
+    try {
+        const UI_ROUTE = "toolpkg:com.operit.qqbot_pro:ui:qqbot_pro_settings";
+        ToolPkg.registerUiRoute({
+            id: "qqbot_pro_settings",
+            route: UI_ROUTE,
+            runtime: "compose_dsl",
+            screen: "dist/ui/qqbot_settings/index.ui.js",
+            params: {},
+            keepAlive: false,
+            title: { zh: "QQ Bot Pro 设置", en: "QQ Bot Pro Settings" }
+        });
+        ToolPkg.registerNavigationEntry({
+            id: "qqbot_pro_sidebar_entry",
+            route: UI_ROUTE,
+            surface: "main_sidebar_plugins",
+            title: { zh: "QQ Bot Pro", en: "QQ Bot Pro" },
+            icon: "settings",
+            order: 90
+        });
+        logStartup("UI route registered");
+    }
+    catch (error) {
+        console.warn(`[qqbot-bridge-pro] UI route registration skipped: ${error && error.message ? error.message : error}`);
+    }
 
     // 自动回复桥生命周期：app 创建/前台 → 自动拉起 Gateway + 桥；终止 → 停桥
     ToolPkg.registerAppLifecycleHook({
