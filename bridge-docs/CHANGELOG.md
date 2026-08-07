@@ -2,6 +2,13 @@
 
 ## 2026-08-08
 
+### 🎉 群链路全闭环（03:07-03:12）+ T043/T044
+- **全链路闭环验证**：`@渡渡 (困困窝)` → mentions 透传识别 @ → 5s 聚合 → AI 完整回复（叫出"初尘"——G7 绑定生效）→ 回传 QQ ✅
+- **T043**：Gateway 资源只解出一次，包内 mentions 透传更新永不生效（旧 py 永驻）；修复：每次启动强制重新解出覆盖
+- **T044**：烧录后桥循环被重置为停止（JS 运行时重建，timer 丢失）；规避：烧录后必须手动 `qqbot_pro_bridge_start`
+- **G7 实测生效**：聚合上下文初尘显示为"初尘"，AI 回复点名初尘 ✅
+- 文档：TROUBLESHOOTING T043/T044；CHANGELOG 本段；HANDOFF 更新；GitHub 推送
+
 ### G7 群成员身份绑定——最小版落地（02:29-02:33）
 - **需求确认**：初尘在群里的 id 可从消息 `author.id` 直接获取（CC9F593975D8C8F1E1EC72DD91305C63，与 C2C openid 相同）
 - **实现**：`groupMemberBindings` 配置（`[{memberOpenid, groupOpenid?, title}]`，env `QQBOT_PRO_GROUP_MEMBER_BINDINGS`）；聚合 attachment 与 `qqbot_pro_group_context` 查询的成员标签优先用绑定名，未绑定回退 QQ+后四位
