@@ -6,12 +6,14 @@
 
 ---
 
-## 0.5. 当前运行状态（2026-08-08 01:2x 快照）
+## 0.5. 当前运行状态（2026-08-08 02:2x 快照）
 
 - **增强版 Gateway**：running + connected（botUsername 渡渡，AppID 1904028946，端口 32146）✅
-- **自动回复桥**：running，idle 3s 轮询 ✅；C2C 绑定初尘（41712e3a）、proactive 目标 CC9F59…、群聚合 60s at_only、waifu 单聊3/群5、群上下文 off
-- **本次修复**：T037（readResource 参数错误 → `ensureGatewayScriptAsync` 统一解资源）、T038（烧录后子包状态重置 → set_sandbox_package_enabled）
-- **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用（同 AppID 互踢 + 双处理）；C2C 绑定 41712e3a（flash 角色卡）勿动，语气问题初尘排查中
+- **自动回复桥**：running，idle 3s 轮询 ✅；C2C 绑定初尘（41712e3a→已改绑 604898bd）、proactive 目标 CC9F59…、群聚合 **5s** 窗口、**keyword_or_at** + 关键词[渡渡,dodo,渡渡渡渡]、waifu 单聊3/群5、群上下文 off
+- **群链路已验证**：@/关键词触发 → 自动建 `[QQ][群]` 对话窗 ✅；AI 回复完整（T041 修复 waifu 空回复）；回传 QQ 待最终确认
+- **近期修复**：T037（readResource 参数）、T038（烧录重置子包）、T039（mentions 识别）、T040（sync.sh src→dist）、T041（群聚合 waifu 空回复）、T042（member_openid ≠ botUserId，content `<@xxx>` 交叉验证）
+- **新需求**：G7 群成员身份绑定（初尘 openid → "我"，其他群友代号）已入蓝图 §12.6，实施顺序在 G3 后
+- **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用（同 AppID 互踢 + 双处理）；语气问题初尘排查中
 
 ---
 
@@ -175,7 +177,7 @@ bash /sdcard/Download/qqbot-pro/scripts/sync.sh
 | QQBOT_APP_ID/SECRET | /data/user/0/com.ai.assistance.operit/shared_prefs/env_preferences.xml | AppID 1904028946，运行时注入 |
 | 增强版 Gateway | package/resources/qqbot_pro_gateway.py | 981+25 行，端口 32146 |
 | 开发环境 | /sdcard/Download/Operit/skills/SandboxPackage_DEV/ | 官方 types + 两份 guide + 42 内置包示例 |
-| 官方文档参考 | bot.q.qq.com/wiki/develop/api-v2/ + sitemap.xml | v2 API 全量 |
+| 官方文档参考 | bot.q.qq.com/wiki/develop/api-v2/ | 详见 bridge-docs/V2-BLUEPRINT.md §13（Intents/事件/时效等，2026-08-08 核对） |
 
 ---
 
