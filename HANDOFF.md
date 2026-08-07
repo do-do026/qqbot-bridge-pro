@@ -6,14 +6,15 @@
 
 ---
 
-## 0.5. 当前运行状态（2026-08-08 02:2x 快照）
+## 0.5. 当前运行状态（2026-08-08 03:1x 快照）
 
-- **增强版 Gateway**：running + connected（botUsername 渡渡，AppID 1904028946，端口 32146）✅
-- **自动回复桥**：running，idle 3s 轮询 ✅；C2C 绑定初尘（41712e3a→已改绑 604898bd）、proactive 目标 CC9F59…、群聚合 **5s** 窗口、**keyword_or_at** + 关键词[渡渡,dodo,渡渡渡渡]、waifu 单聊3/群5、群上下文 off
-- **群链路已验证**：@/关键词触发 → 自动建 `[QQ][群]` 对话窗 ✅；AI 回复完整（T041 修复 waifu 空回复）；回传 QQ 待最终确认
-- **近期修复**：T037（readResource 参数）、T038（烧录重置子包）、T039（mentions 识别）、T040（sync.sh src→dist）、T041（群聚合 waifu 空回复）、T042（member_openid ≠ botUserId，content `<@xxx>` 交叉验证）
-- **新需求**：G7 群成员身份绑定（初尘 openid → "我"，其他群友代号）已入蓝图 §12.6，实施顺序在 G3 后
-- **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用（同 AppID 互踢 + 双处理）；语气问题初尘排查中
+- **✅ 群链路全闭环（03:12 实测）**：@消息（mentions 透传识别）→ 5s 聚合 → AI 完整回复（G7 识别"初尘"）→ 回传 QQ 成功
+- **增强版 Gateway**：running + connected（botUsername 渡渡，AppID 1904028946，端口 32146）
+- **自动回复桥**：running，idle 3s 轮询；C2C 绑定初尘（604898bd）、proactive 目标 CC9F59…、群聚合 5s、keyword_or_at + 关键词[渡渡,dodo,渡渡渡渡]、群成员绑定初尘（G7）、waifu 单聊3/群5
+- **⚠️ 烧录 SOP（T044）**：每次 debug_install_toolpkg 后必须重新 `qqbot_pro_bridge_start`（桥循环会被重置）
+- **近期修复**：T037-T044 全记录于 TROUBLESHOOTING；T043 后 Gateway 每次启动强制重解资源
+- **下一步**：G4 统一 Waifu chunker → G2 上下文三态收尾 → G3 replyTo → G7 完整版（UI 管理）→ G5 Hook → G6 UI
+- **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用；语气问题初尘排查中
 
 ---
 
