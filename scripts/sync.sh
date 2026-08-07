@@ -17,6 +17,17 @@ if [ ! -f "$MAIN_DIR/manifest.json" ]; then
     exit 1
 fi
 
+# 0.5. src → dist 同步（T040：2026-08-08 曾因只改 src 未同步 dist，烧录了旧代码）
+# 手写 JS 免编译，但 src 与 dist 必须保持一致；只同步 src 下真实存在的 JS 文件
+for f in "$MAIN_DIR"/src/main.js "$MAIN_DIR"/src/shared/*.js "$MAIN_DIR"/src/packages/*.js "$MAIN_DIR"/src/ui/qqbot_settings/index.ui.js; do
+    if [ -f "$f" ]; then
+        rel="${f#"$MAIN_DIR/src/"}"
+        mkdir -p "$MAIN_DIR/dist/$(dirname "$rel")"
+        cp "$f" "$MAIN_DIR/dist/$rel"
+    fi
+done
+echo "OK  src → dist 已同步"
+
 # 1. 同步 dev_package <- 主目录（官方烧录需要）
 mkdir -p "$DEV_DIR"
 rm -rf "$DEV_DIR/manifest.json" "$DEV_DIR/src" "$DEV_DIR/dist" "$DEV_DIR/resources" "$DEV_DIR/test"
