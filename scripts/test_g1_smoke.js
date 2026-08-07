@@ -120,6 +120,14 @@ function makeEvent(overrides) {
     assert(JSON.stringify(bridgeConfig.normalizeGroupKeywords('["渡渡","dodo"]')) === '["渡渡","dodo"]', "normalizeGroupKeywords JSON 字符串");
     assert(JSON.stringify(bridgeConfig.normalizeGroupKeywords("渡渡,dodo，测试")) === '["渡渡","dodo","测试"]', "normalizeGroupKeywords 逗号/顿号分隔");
 
+    // 2.8) G7 群成员身份绑定
+    const g7Cfg = { ...cfg, groupMemberBindings: [{ memberOpenid: "CC9F59", title: "初尘" }, { memberOpenid: "OTHER1", groupOpenid: "groupA", title: "群友甲" }] };
+    assert(bridgeAuto._internal.resolveMemberLabel(g7Cfg, "CC9F59", "groupA") === "初尘", "G7：全局绑定命中 → 初尘");
+    assert(bridgeAuto._internal.resolveMemberLabel(g7Cfg, "OTHER1", "groupA") === "群友甲", "G7：群限定绑定命中 → 群友甲");
+    assert(bridgeAuto._internal.resolveMemberLabel(g7Cfg, "OTHER1", "groupB") === "QQHER1", "G7：群限定不匹配 → QQ+后四位");
+    assert(bridgeAuto._internal.resolveMemberLabel(g7Cfg, "UNKNOWN", "groupA") === "QQNOWN", "G7：未绑定 → QQ+后四位");
+    assert(JSON.stringify(bridgeConfig.normalizeGroupMemberBindings('[{"memberOpenid":"CC9F59","title":"初尘"},{"memberOpenid":"OTHER1","groupOpenid":"groupA","title":"群友甲"}]')) === '[{"memberOpenid":"CC9F59","groupOpenid":"","title":"初尘"},{"memberOpenid":"OTHER1","groupOpenid":"groupA","title":"群友甲"}]', "normalizeGroupMemberBindings JSON");
+
     // 3) 上下文缓存容量：单群 30 / 全局 100
     bridgeAuto._internal.clearGroupRuntimeState();
     for (let i = 0; i < 35; i += 1) {
