@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro v0.3.0: merge qqbot-bridge-pro v1.0.0 (auto reply bridge + G1) 2026-08-08"
+COMMIT_MSG = "qqbot-pro v0.3.0 hotfix: gateway readResource fix (T037) + subpackage state reset (T038) 2026-08-08"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
