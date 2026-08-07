@@ -155,9 +155,46 @@ function serializeCachedEvent(event) {
         replyHint: (0, core.isObject)(event.replyHint) ? JSON.parse(JSON.stringify(event.replyHint)) : undefined
     };
 }
-function isGroupAtEventType(eventType) {
+function isGroupAtEventType(eventType, event, botUserId) {
     const text = (0, core.asText)(eventType).trim().toUpperCase();
-    return text === "GROUP_AT_MESSAGE_CREATE" || text.includes("AT_MESSAGE");
+    if (text === "GROUP_AT_MESSAGE_CREATE" || text.includes("AT_MESSAGE")) {
+        return true;
+    }
+    // T039（2026-08-08）：QQ「接收所有消息」全量模式下，@ 消息以 GROUP_MESSAGE_CREATE 推送，
+    // @ 标记藏在 payload.mentions 字段里。Gateway 已透传 mentions，这里做兜底识别：
+    // 只要 mentions 含机器人 id（id / user_openid / member_openid 任一匹配），即视为 @ 触发。
+    const mentions = Array.isArray(event && event.mentions) ? event.mentions : [];
+    const botId = (0, core.asText)(botUserId).trim();
+    if (mentions.length > 0 && botId) {
+        return mentions.some((user) => {
+            if (!core.isObject(user)) {
+                return false;
+            }
+            const candidateIds = [
+                (0, core.asText)(user.id).trim(),
+                (0, core.asText)(user.user_openid).trim(),
+                (0, core.asText)(user.member_openid).trim()
+            ];
+            return candidateIds.some((candidate) => candidate && candidate === botId);
+        });
+    }
+    return false;
+}
+function matchGroupKeyword(keywords, content) {
+    if (!Array.isArray(keywords) || keywords.length === 0) {
+        return false;
+    }
+    const text = (0, core.asText)(content).trim().toLowerCase();
+    if (!text) {
+        return false;
+    }
+    for (let index = 0; index < keywords.length; index += 1) {
+        const keyword = (0, core.asText)(keywords[index]).trim().toLowerCase();
+        if (keyword && text.includes(keyword)) {
+            return true;
+        }
+    }
+    return false;
 }
 function pushToGroupContextCache(config, event) {
     const groupOpenId = (0, core.asText)(event.groupOpenId).trim();
@@ -1178,10 +1215,20 @@ function classifyEvent(config, event, serviceState) {
         return { action: "skip", reason: "group_disabled" };
     }
     // Epic G1：群消息分流——at_only 模式下普通群消息只进上下文缓存，不唤醒 AI
+    // T039：全量模式下 @ 标记在 mentions 里，isGroupAtEventType 做兜底识别；
+    //       keyword_or_at 模式下命中 groupKeywords 也视为触发。
     if (scene === "group") {
         const messageMode = (0, core.asText)(config.groupMessageMode).trim().toLowerCase() || "at_only";
-        if (messageMode === "at_only" && !isGroupAtEventType(eventType)) {
+        const botId = (0, core.asText)(serviceState && serviceState.botUserId).trim();
+        if (messageMode === "at_only" && !isGroupAtEventType(eventType, event, botId)) {
             return { action: "context_only", reason: "group_message_not_at" };
+        }
+        if (messageMode === "keyword_or_at") {
+            const isAt = isGroupAtEventType(eventType, event, botId);
+            const hitKeyword = matchGroupKeyword(config.groupKeywords, content);
+            if (!isAt && !hitKeyword) {
+                return { action: "context_only", reason: "group_message_not_at_nor_keyword" };
+            }
         }
     }
     if (scene !== "c2c" && scene !== "group") {
@@ -1660,6 +1707,9 @@ async function qqbot_auto_reply_configure(params = {}) {
         // ---- 14:32 群窗口 / 上下文 / 容量新增参数 ----
         if ((0, core.hasOwn)(params, "group_message_mode")) {
             patch.groupMessageMode = (0, core.asText)(params.group_message_mode).trim().toLowerCase();
+        }
+        if ((0, core.hasOwn)(params, "group_keywords")) {
+            patch.groupKeywords = bridgeConfig.normalizeGroupKeywords(params.group_keywords);
         }
         if ((0, core.hasOwn)(params, "group_context_mode")) {
             patch.groupContextMode = (0, core.asText)(params.group_context_mode).trim().toLowerCase();
