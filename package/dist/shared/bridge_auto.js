@@ -1,5 +1,6 @@
 const core = require("./core.js");
 const state = require("./bridge_state.js");
+const bridgeConfig = require("./bridge_config.js");
 const gateway = require("../packages/qqbot_pro_gateway.js");
 "use strict";
 module.exports = {
@@ -13,6 +14,27 @@ module.exports = {
     qqbot_pro_bridge_bind_c2c,
     qqbot_pro_bridge_set_proactive_target,
     qqbot_pro_bridge_list_image_folders,
+    qqbot_pro_group_context,
+    // 测试专用内部钩子（仅供冒烟测试读取内存缓存/调用纯逻辑函数，运行时不使用）
+    _internal: {
+        classifyEvent,
+        pushToGroupContextCache,
+        trimGroupContextCacheGlobal,
+        isGroupAtEventType,
+        buildEventKey,
+        serializeCachedEvent,
+        restoreGroupRuntimeStateAsync,
+        persistGroupRuntimeStateAsync,
+        clearGroupRuntimeState,
+        // getter：避免 module.exports 在顶部求值时触碰尚未初始化的 const Map（TDZ）
+        get groupContextCache() {
+            return groupContextCache;
+        },
+        get groupPendingBuckets() {
+            return groupPendingBuckets;
+        },
+        readAutoReplyConfigAsync
+    },
     onQQBotAutoReplyApplicationCreate,
     onQQBotAutoReplyApplicationForeground,
     onQQBotAutoReplyApplicationTerminate
@@ -20,138 +42,19 @@ module.exports = {
 const WaifuMessageProcessor = Java.com.ai.assistance.operit.util.WaifuMessageProcessor;
 const DEFAULT_ASSISTANT_INSTRUCTION = "";
 const MAX_EVENT_PROCESS_FAIL_COUNT = 3;
-const DEFAULT_AUTO_REPLY_CONFIG = {
-    enabled: true,
-    pollIntervalMs: 3000,
-    aiTimeoutMs: 180000,
-    c2cEnabled: true,
-    groupEnabled: true,
-    waifu: true,
-    chatGroup: "QQ Bot",
-    characterCardId: "",
-    assistantInstruction: DEFAULT_ASSISTANT_INSTRUCTION,
-    targetChatId: "",
-    waifuFlushSentences: 3,
-    groupAggregateWindowMs: 25000,
-    groupWaifuFlushSentences: 5,
-    proactiveC2cOpenId: "",
-    groupAggregateMaxItems: 10,
-    groupNicknameEnabled: false,
-    c2cFixedBindings: []
-};
 let autoReplyTimerId = null;
 let autoReplyTickActive = false;
 const groupPendingBuckets = new Map();
+const groupContextCache = new Map(); // Epic G1：群上下文环形缓存 key=groupOpenId → { events: [], lastAt }
+const groupCacheStateDirty = { dirty: false }; // 内存缓存有变更但未落盘
 const groupNicknameCache = new Map();
 const GROUP_NICKNAME_TTL_MS = 3600000;
-function normalizeC2cFixedBindings(raw) {
-    let items = [];
-    if (Array.isArray(raw)) {
-        items = raw;
-    }
-    else if (typeof raw === "string" && (0, core.asText)(raw).trim()) {
-        try {
-            const parsed = JSON.parse((0, core.asText)(raw));
-            if (Array.isArray(parsed)) {
-                items = parsed;
-            }
-        }
-        catch (_error) { }
-    }
-    const result = [];
-    const seen = new Set();
-    for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        if (!(0, core.isObject)(item)) {
-            continue;
-        }
-        const openid = (0, core.asText)(item.openid).trim();
-        const chatId = (0, core.asText)(item.chatId).trim();
-        if (!openid || !chatId || seen.has(openid)) {
-            continue;
-        }
-        seen.add(openid);
-        result.push({
-            openid,
-            chatId,
-            title: (0, core.asText)(item.title).trim()
-        });
-    }
-    return result;
-}
+/**
+ * 桥接配置归一化（Epic G0 统一入口）。
+ * 字段表/默认值/env回退/clamp/旧字段迁移全部收敛到 bridge_config.js。
+ */
 function normalizeAutoReplyConfig(raw) {
-    const next = {
-        ...DEFAULT_AUTO_REPLY_CONFIG
-    };
-    if ((0, core.hasOwn)(raw, "enabled")) {
-        next.enabled = (0, core.toBoolean)(raw.enabled, DEFAULT_AUTO_REPLY_CONFIG.enabled);
-    }
-    if ((0, core.hasOwn)(raw, "pollIntervalMs")) {
-        next.pollIntervalMs = (0, core.parsePositiveInt)(raw.pollIntervalMs, "pollIntervalMs", DEFAULT_AUTO_REPLY_CONFIG.pollIntervalMs);
-    }
-    if ((0, core.hasOwn)(raw, "aiTimeoutMs")) {
-        next.aiTimeoutMs = (0, core.parsePositiveInt)(raw.aiTimeoutMs, "aiTimeoutMs", DEFAULT_AUTO_REPLY_CONFIG.aiTimeoutMs);
-    }
-    const c2cEnabled = (0, core.parseOptionalBoolean)(raw.c2cEnabled, "c2cEnabled");
-    if (c2cEnabled !== undefined) {
-        next.c2cEnabled = c2cEnabled;
-    }
-    const groupEnabled = (0, core.parseOptionalBoolean)(raw.groupEnabled, "groupEnabled");
-    if (groupEnabled !== undefined) {
-        next.groupEnabled = groupEnabled;
-    }
-    const waifu = (0, core.parseOptionalBoolean)(raw.waifu, "waifu");
-    if (waifu !== undefined) {
-        next.waifu = waifu;
-    }
-    if ((0, core.hasOwn)(raw, "chatGroup")) {
-        next.chatGroup = (0, core.firstNonBlank)((0, core.asText)(raw.chatGroup), DEFAULT_AUTO_REPLY_CONFIG.chatGroup);
-    }
-    if ((0, core.hasOwn)(raw, "characterCardId")) {
-        next.characterCardId = (0, core.asText)(raw.characterCardId).trim();
-    }
-    if ((0, core.hasOwn)(raw, "assistantInstruction")) {
-        next.assistantInstruction = (0, core.asText)(raw.assistantInstruction).trim();
-    }
-    if ((0, core.hasOwn)(raw, "targetChatId")) {
-        next.targetChatId = (0, core.asText)(raw.targetChatId).trim();
-    }
-    if (!next.targetChatId && typeof getEnv === "function") {
-        const envTarget = (0, core.asText)(getEnv("QQBOT_TARGET_CHAT_ID") || "").trim();
-        if (envTarget) {
-            next.targetChatId = envTarget;
-        }
-    }
-    if (!next.characterCardId) next.characterCardId = (0, core.readEnv)("QQBOT_PRO_CHARACTER_CARD");
-    const envWaifu = (0, core.readEnv)("QQBOT_PRO_WAIFU_FLUSH");
-    if (envWaifu && !(0, core.hasOwn)(raw, "waifuFlushSentences")) next.waifuFlushSentences = (0, core.parsePositiveInt)(envWaifu, "QQBOT_PRO_WAIFU_FLUSH", 3);
-    if (!(0, core.hasOwn)(raw, "enabled")) {
-        const envAuto = (0, core.readEnv)("QQBOT_PRO_AUTO_REPLY");
-        if (envAuto) next.enabled = (0, core.toBoolean)(envAuto, true);
-    }
-    if ((0, core.hasOwn)(raw, "waifuFlushSentences")) {
-        next.waifuFlushSentences = (0, core.parsePositiveInt)(raw.waifuFlushSentences, "waifuFlushSentences", DEFAULT_AUTO_REPLY_CONFIG.waifuFlushSentences);
-    }
-    if ((0, core.hasOwn)(raw, "groupAggregateWindowMs")) {
-        next.groupAggregateWindowMs = (0, core.parsePositiveInt)(raw.groupAggregateWindowMs, "groupAggregateWindowMs", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateWindowMs);
-    }
-    if ((0, core.hasOwn)(raw, "groupWaifuFlushSentences")) {
-        next.groupWaifuFlushSentences = (0, core.parsePositiveInt)(raw.groupWaifuFlushSentences, "groupWaifuFlushSentences", 5);
-    }
-    if ((0, core.hasOwn)(raw, "proactiveC2cOpenId")) {
-        next.proactiveC2cOpenId = (0, core.asText)(raw.proactiveC2cOpenId).trim();
-    }
-    if ((0, core.hasOwn)(raw, "groupAggregateMaxItems")) {
-        next.groupAggregateMaxItems = (0, core.parsePositiveInt)(raw.groupAggregateMaxItems, "groupAggregateMaxItems", DEFAULT_AUTO_REPLY_CONFIG.groupAggregateMaxItems);
-    }
-    const groupNicknameEnabled = (0, core.parseOptionalBoolean)(raw.groupNicknameEnabled, "groupNicknameEnabled");
-    if (groupNicknameEnabled !== undefined) {
-        next.groupNicknameEnabled = groupNicknameEnabled;
-    }
-    if ((0, core.hasOwn)(raw, "c2cFixedBindings")) {
-        next.c2cFixedBindings = normalizeC2cFixedBindings(raw.c2cFixedBindings);
-    }
-    return next;
+    return bridgeConfig.normalizeBridgeConfig(raw).config;
 }
 async function readAutoReplyConfigAsync() {
     const storedConfig = await (0, state.readPersistedConfigAsync)();
@@ -162,25 +65,7 @@ async function readAutoReplyConfigAsync() {
 async function writeAutoReplyConfigAsync(config) {
     const normalized = normalizeAutoReplyConfig(config);
     await (0, state.updatePersistedConfigAsync)({
-        autoReply: {
-            enabled: normalized.enabled,
-            pollIntervalMs: normalized.pollIntervalMs,
-            aiTimeoutMs: normalized.aiTimeoutMs,
-            c2cEnabled: normalized.c2cEnabled,
-            groupEnabled: normalized.groupEnabled,
-            waifu: normalized.waifu,
-            chatGroup: normalized.chatGroup,
-            characterCardId: normalized.characterCardId,
-            assistantInstruction: normalized.assistantInstruction,
-            targetChatId: normalized.targetChatId,
-            waifuFlushSentences: normalized.waifuFlushSentences,
-            groupAggregateWindowMs: normalized.groupAggregateWindowMs,
-            groupWaifuFlushSentences: normalized.groupWaifuFlushSentences,
-            proactiveC2cOpenId: normalized.proactiveC2cOpenId,
-            groupAggregateMaxItems: normalized.groupAggregateMaxItems,
-            groupNicknameEnabled: normalized.groupNicknameEnabled,
-            c2cFixedBindings: normalizeC2cFixedBindings(normalized.c2cFixedBindings)
-        }
+        autoReply: normalized
     });
     return normalized;
 }
@@ -251,6 +136,167 @@ function trimRecordMap(records) {
         next[item.key] = item.value;
     });
     return next;
+}
+
+// ---- Epic G1：群上下文缓存 / 聚合桶持久化与恢复 ----
+
+function serializeCachedEvent(event) {
+    return {
+        eventId: (0, core.asText)(event.eventId).trim(),
+        messageId: (0, core.asText)(event.messageId).trim(),
+        eventType: (0, core.asText)(event.eventType).trim(),
+        scene: (0, core.asText)(event.scene).trim(),
+        content: (0, core.asText)(event.content).trim(),
+        userOpenId: (0, core.asText)(event.userOpenId).trim(),
+        groupOpenId: (0, core.asText)(event.groupOpenId).trim(),
+        authorId: (0, core.asText)(event.authorId).trim(),
+        timestamp: (0, core.asText)(event.timestamp).trim(),
+        receivedAt: (0, core.asText)(event.receivedAt).trim(),
+        replyHint: (0, core.isObject)(event.replyHint) ? JSON.parse(JSON.stringify(event.replyHint)) : undefined
+    };
+}
+function isGroupAtEventType(eventType) {
+    const text = (0, core.asText)(eventType).trim().toUpperCase();
+    return text === "GROUP_AT_MESSAGE_CREATE" || text.includes("AT_MESSAGE");
+}
+function pushToGroupContextCache(config, event) {
+    const groupOpenId = (0, core.asText)(event.groupOpenId).trim();
+    if (!groupOpenId) {
+        return;
+    }
+    let entry = groupContextCache.get(groupOpenId);
+    if (!entry) {
+        entry = { events: [], lastAt: Date.now() };
+        groupContextCache.set(groupOpenId, entry);
+    }
+    const eventKey = buildEventKey(event);
+    const alreadyInCache = entry.events.some((existing) => buildEventKey(existing) === eventKey);
+    if (!alreadyInCache) {
+        entry.events.push(serializeCachedEvent(event));
+        entry.lastAt = Date.now();
+    }
+    // 单群容量：只保留最新 groupMaxItems 条（默认 30）
+    const maxPerGroup = Math.max(Number(config.groupMaxItems) || 30, 1);
+    if (entry.events.length > maxPerGroup) {
+        entry.events = entry.events.slice(-maxPerGroup);
+    }
+    // 全局容量：跨群按事件时间保留最新 groupGlobalCacheMaxItems 条（默认 100）
+    trimGroupContextCacheGlobal(Math.max(Number(config.groupGlobalCacheMaxItems) || 100, 1));
+}
+function trimGroupContextCacheGlobal(globalMax) {
+    const all = [];
+    for (const [gid, entry] of groupContextCache.entries()) {
+        for (let index = 0; index < entry.events.length; index += 1) {
+            const ev = entry.events[index];
+            const ts = Number(ev.timestamp) || Number(ev.receivedAt) || 0;
+            all.push({ gid, ev, ts });
+        }
+    }
+    if (all.length <= globalMax) {
+        return;
+    }
+    all.sort((left, right) => right.ts - left.ts);
+    const keep = new Set();
+    for (let index = 0; index < globalMax; index += 1) {
+        keep.add(`${all[index].gid}|${buildEventKey(all[index].ev)}`);
+    }
+    for (const [gid, entry] of groupContextCache.entries()) {
+        entry.events = entry.events.filter((ev) => keep.has(`${gid}|${buildEventKey(ev)}`));
+        if (entry.events.length === 0) {
+            groupContextCache.delete(gid);
+        }
+    }
+}
+async function persistGroupRuntimeStateAsync() {
+    if (!groupCacheStateDirty.dirty) {
+        return false;
+    }
+    const store = await readAutoReplyStateStoreAsync();
+    const buckets = {};
+    for (const [gid, bucket] of groupPendingBuckets.entries()) {
+        buckets[gid] = {
+            events: bucket.events.map((ev) => serializeCachedEvent(ev)),
+            firstAt: bucket.firstAt,
+            lastAt: bucket.lastAt,
+            overflowCount: bucket.overflowCount || 0
+        };
+    }
+    const context = {};
+    for (const [gid, entry] of groupContextCache.entries()) {
+        context[gid] = {
+            events: entry.events,
+            lastAt: entry.lastAt
+        };
+    }
+    await writeAutoReplyStateStoreAsync({
+        ...store,
+        buckets,
+        context
+    });
+    await flushAutoReplyStateStoreAsync();
+    groupCacheStateDirty.dirty = false;
+    return true;
+}
+async function restoreGroupRuntimeStateAsync(config) {
+    // 幂等：内存已有状态时不重复恢复
+    if (groupPendingBuckets.size > 0 || groupContextCache.size > 0) {
+        return { restored: false, reason: "already_in_memory" };
+    }
+    const recoveryMaxAgeMs = Math.max(Number(config.groupCacheRecoveryMaxAgeMs) || 0, 0);
+    const store = await readAutoReplyStateStoreAsync();
+    const now = Date.now();
+    let recoveredBucketCount = 0;
+    let recoveredContextCount = 0;
+    // 聚合桶恢复：只恢复 lastAt 在恢复窗口内的；窗口外直接丢弃（初尘 2026-08-07 确认"关一两天再开该丢就丢"）
+    if ((0, core.isObject)(store.buckets)) {
+        for (const [gid, data] of Object.entries(store.buckets)) {
+            if (!(0, core.isObject)(data) || !Array.isArray(data.events) || data.events.length === 0) {
+                continue;
+            }
+            const lastAt = Number(data.lastAt) || Number(data.firstAt) || 0;
+            const age = lastAt > 0 ? now - lastAt : 0;
+            if (recoveryMaxAgeMs === 0 || (recoveryMaxAgeMs > 0 && age > recoveryMaxAgeMs)) {
+                continue;
+            }
+            const firstAt = Number(data.firstAt) || now;
+            groupPendingBuckets.set(gid, {
+                events: data.events,
+                firstAt,
+                lastAt: lastAt || now,
+                overflowCount: Number(data.overflowCount) || 0
+            });
+            recoveredBucketCount += 1;
+        }
+    }
+    // 上下文缓存恢复：同样按恢复窗口过滤
+    if ((0, core.isObject)(store.context)) {
+        for (const [gid, data] of Object.entries(store.context)) {
+            if (!(0, core.isObject)(data) || !Array.isArray(data.events) || data.events.length === 0) {
+                continue;
+            }
+            const lastAt = Number(data.lastAt) || 0;
+            const age = lastAt > 0 ? now - lastAt : 0;
+            if (recoveryMaxAgeMs === 0 || (recoveryMaxAgeMs > 0 && age > recoveryMaxAgeMs)) {
+                continue;
+            }
+            groupContextCache.set(gid, {
+                events: data.events,
+                lastAt: lastAt || now
+            });
+            recoveredContextCount += 1;
+        }
+    }
+    if (recoveredBucketCount > 0 || recoveredContextCount > 0) {
+        // 把恢复后的状态写回（清掉被过滤的旧数据），避免文件无限膨胀
+        groupCacheStateDirty.dirty = true;
+        await persistGroupRuntimeStateAsync();
+    }
+    return { restored: true, recoveredBucketCount, recoveredContextCount, recoveryMaxAgeMs };
+}
+function clearGroupRuntimeState() {
+    groupPendingBuckets.clear();
+    groupContextCache.clear();
+    groupCacheStateDirty.dirty = true;
 }
 async function incrementEventProcessFailCountAsync(eventKey, errorText) {
     const records = await readAutoReplyRecordsAsync();
@@ -487,6 +533,22 @@ function buildInboundChatContextAttachment(config, event) {
     if (authorId) {
         contentLines.push(`authorId: ${authorId}`);
     }
+    // 时间戳（Gateway 事件自带 timestamp / receivedAt，之前被漏传，导致 AI 误判消息为"刚刚发的"）
+    const timestamp = (0, core.asText)(event.timestamp).trim();
+    if (timestamp) {
+        contentLines.push(`sentAt: ${timestamp}`);
+    }
+    const receivedAt = (0, core.asText)(event.receivedAt).trim();
+    if (receivedAt) {
+        contentLines.push(`receivedAt: ${receivedAt}`);
+    }
+    // 积压检测：消息实际发送时间距今超过阈值 → 顶部插入醒目标记，防止 AI 当实时消息回复
+    const STALE_THRESHOLD_MS = 10 * 60 * 1000;
+    const eventTs = Number(event.timestamp) || 0;
+    const ageMs = eventTs > 0 ? Date.now() - eventTs : 0;
+    if (ageMs > STALE_THRESHOLD_MS) {
+        contentLines.unshift(`[stale: 延迟 ${Math.round(ageMs / 1000 / 60)} 分钟到达的历史消息，实际发送时间见下方 sentAt]`, "");
+    }
     const extraInstruction = (0, core.asText)(config.assistantInstruction).trim();
     if (extraInstruction) {
         contentLines.push("");
@@ -614,20 +676,10 @@ async function resolveBoundChatIdAsync(config, event) {
             throw new Error(`QQ c2c fixed binding chat not found: ${c2cBinding.chatId}`);
         }
     }
-    else {
-        const fixedTargetChatId = (0, core.firstNonBlank)((0, core.asText)(config.targetChatId).trim());
-        if (fixedTargetChatId) {
-            const findFixed = await Tools.Chat.findChat({
-                query: fixedTargetChatId,
-                match: "exact",
-                index: 0
-            });
-            if ((findFixed.chat?.id ?? "") === fixedTargetChatId) {
-                return fixedTargetChatId;
-            }
-            throw new Error(`QQ auto reply target chat not found: ${fixedTargetChatId}`);
-        }
-    }
+    // 2026-08-07 初尘实测确认：群聊固定目标 target_chat_id 语义废弃。
+    // 群消息（含 @Bot）一律按 group:{group_openid} 新建/复用独立 Operit 对话，
+    // 不再绑定到任何指定对话框；target_chat_id 字段仅保留用于兼容读取旧配置，不再参与路由。
+    // （V2-BLUEPRINT §3.2 已同步）
     const store = await readAutoReplyStateStoreAsync();
     const bindings = {
         ...store.bindings
@@ -711,28 +763,44 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
     }
     const chatId = await resolveBoundChatIdAsync(config, event);
     const userMessage = (0, core.asText)(options.userMessage).trim() || await buildInboundChatMessage(config, event);
-    const MAX_EMPTY_RETRIES = 3;
+    // 群聚合场景（Epic G0）：AI 生成超时用 groupAiTimeoutMs（默认120s），只试一次，
+    // 超时/空回复立即失败并标记 group_ai_timeout，不进多次重试拖过期效窗口。
+    const maxEmptyRetries = Number(options.maxEmptyRetries) >= 0 ? Number(options.maxEmptyRetries) : 3;
+    const aiTimeoutMs = Number(options.aiTimeoutMs) > 0 ? Number(options.aiTimeoutMs) : config.aiTimeoutMs;
+    const isGroupScene = options.scene === "group";
     let aiResponse = "";
     let sendResult = null;
-    for (let attempt = 1; attempt <= MAX_EMPTY_RETRIES; attempt += 1) {
-        sendResult = await Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
-            waifu: config.waifu,
-            persist_turn: true,
-            notify_reply: false,
-            hide_user_message: false,
-            disable_warning: true,
-            timeout_ms: config.aiTimeoutMs,
-            onIntermediateResult
-        });
+    for (let attempt = 1; attempt <= maxEmptyRetries; attempt += 1) {
+        try {
+            sendResult = await Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
+                waifu: config.waifu,
+                persist_turn: true,
+                notify_reply: false,
+                hide_user_message: false,
+                disable_warning: true,
+                timeout_ms: aiTimeoutMs,
+                onIntermediateResult
+            });
+        }
+        catch (error) {
+            const errorText = (0, core.safeErrorMessage)(error);
+            if (isGroupScene) {
+                throw new Error(`group_ai_timeout: ${errorText}`);
+            }
+            throw error;
+        }
         aiResponse = sanitizeAiReplyText((sendResult.aiResponse ?? "").trim());
         if (aiResponse) {
             break;
         }
-        if (attempt < MAX_EMPTY_RETRIES) {
+        if (attempt < maxEmptyRetries) {
             await Tools.System.sleep(attempt * 5000);
         }
     }
     if (!aiResponse) {
+        if (isGroupScene) {
+            throw new Error("group_ai_timeout: empty response");
+        }
         throw new Error("AI returned an empty response for QQ auto reply");
     }
     records[eventKey] = {
@@ -855,6 +923,14 @@ function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregated
         "",
         "instruction: 这是群内多条消息聚合后的结果（已标注发言者）。请从中选择值得回应的内容回复，可点名回应某位群友，也可以整体回应；不要逐条回复，不要刷屏。"
     ];
+    const timestamp = (0, core.asText)(aggregateEvent.timestamp).trim();
+    if (timestamp) {
+        contentLines.push(`batchLastSentAt: ${timestamp}`);
+    }
+    const receivedAt = (0, core.asText)(aggregateEvent.receivedAt).trim();
+    if (receivedAt) {
+        contentLines.push(`receivedAt: ${receivedAt}`);
+    }
     const content = contentLines.join("\n");
     const attachmentId = `GROUP_AGGREGATE:${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`;
     return `<attachment id="${escapeXml(attachmentId)}" filename="qq_group_aggregate_context.txt" type="text/plain" size="${content.length}">${escapeXml(content)}</attachment>`;
@@ -888,6 +964,18 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
     const events = bucket.events;
     const snapshot = await (0, state.requireConfiguredSnapshotAsync)();
     const aggregateText = await buildGroupAggregateMessageAsync(config, snapshot, events);
+    // 群聚合积压检测：遍历 batch 找最旧 timestamp，超过阈值 → 标注历史消息
+    const STALE_THRESHOLD_MS = 10 * 60 * 1000;
+    let oldestBatchTs = 0;
+    for (let index = 0; index < events.length; index += 1) {
+        const ts = Number(events[index].timestamp) || 0;
+        if (ts > 0 && (oldestBatchTs === 0 || ts < oldestBatchTs)) {
+            oldestBatchTs = ts;
+        }
+    }
+    const staleMark = oldestBatchTs > 0 && (Date.now() - oldestBatchTs) > STALE_THRESHOLD_MS
+        ? `[stale: 本批消息最早发送于 ${Math.round((Date.now() - oldestBatchTs) / 1000 / 60)} 分钟前的历史消息，详见各条标柱的 sentAt]\n\n`
+        : "";
     const lastEvent = events[events.length - 1];
     const aggregateEventKey = `GROUP_AGGREGATE:${groupOpenId}:${Date.now()}`;
     const aggregateEvent = {
@@ -900,9 +988,66 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
         userOpenId: "",
         authorId: ""
     };
-    const userMessage = [aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
-    const generated = await generateAiReplyAsync(config, aggregateEvent, aggregateEventKey, undefined, { userMessage });
+    const userMessage = [staleMark + aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
+    // 群聚合场景（Epic G0）：AI 生成超时用 groupAiTimeoutMs、单次尝试；超时抛 group_ai_timeout。
+    const generated = await generateAiReplyAsync(config, aggregateEvent, aggregateEventKey, undefined, {
+        userMessage,
+        scene: "group",
+        aiTimeoutMs: config.groupAiTimeoutMs,
+        maxEmptyRetries: 1
+    });
     const aiResponse = (0, core.asText)(generated.aiResponse).trim();
+    // 锚点时效安全阀（Epic G0 提前量）：QQ 群被动回复约 5 分钟时效，预留 60s 安全边界。
+    // 窗口最后一条消息到达至今超过 4 分钟 → 不硬发过期被动回复，放弃并记录原因。
+    // （完整的 active_send 主动点名降级依赖 G3 replyTo 协议，届时启用。）
+    const anchorAgeMs = Date.now() - (bucket.lastAt || Date.now());
+    const GROUP_PASSIVE_REPLY_WINDOW_MS = 4 * 60 * 1000;
+    if (anchorAgeMs > GROUP_PASSIVE_REPLY_WINDOW_MS) {
+        const records = await readAutoReplyRecordsAsync();
+        const nowIso = new Date().toISOString();
+        for (let index = 0; index < events.length; index += 1) {
+            const eventKey = buildEventKey(events[index]);
+            if (!eventKey) {
+                continue;
+            }
+            records[eventKey] = {
+                status: "anchor_expired_dropped",
+                chatId: (0, core.asText)(generated.chatId).trim(),
+                aiResponse,
+                failCount: 0,
+                lastError: `anchor_expired: age=${Math.round(anchorAgeMs / 1000)}s (over ${GROUP_PASSIVE_REPLY_WINDOW_MS / 1000}s safe window)`,
+                updatedAt: nowIso,
+                scene: "group",
+                messageId: (0, core.asText)(events[index].messageId).trim(),
+                aggregateKey: aggregateEventKey
+            };
+        }
+        await writeAutoReplyRecordsAsync(records);
+        const eventKeys = [];
+        for (let index = 0; index < events.length; index += 1) {
+            const eventKey = buildEventKey(events[index]);
+            if (eventKey) {
+                eventKeys.push(eventKey);
+            }
+        }
+        if (eventKeys.length > 0) {
+            await gateway.removeGatewayEvents(eventKeys, 8000);
+        }
+        return {
+            eventKey: aggregateEventKey,
+            chatId: (0, core.asText)(generated.chatId).trim(),
+            replyPreview: aiResponse.slice(0, 200),
+            aggregatedCount: events.length,
+            dropped: true,
+            dropReason: "anchor_expired",
+            sendResult: {
+                scene: "group",
+                groupOpenId,
+                aggregated: true,
+                dropped: true
+            }
+        };
+    }
     await sendReplyChunksToQQAsync(lastEvent, aiResponse, config.groupWaifuFlushSentences || 5);
     const eventKeys = [];
     for (let index = 0; index < events.length; index += 1) {
@@ -949,40 +1094,74 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
 async function flushDueGroupBucketsAsync(config) {
     const now = Date.now();
     const windowMs = Math.max(Number(config.groupAggregateWindowMs) || 0, 0);
-    const maxItems = Math.max(Number(config.groupAggregateMaxItems) || 1, 1);
+    const maxItems = Math.max(Number(config.groupMaxItems) || 1, 1);
+    const concurrency = Math.min(Math.max(Number(config.groupFlushConcurrency) || 3, 1), 8);
+    const due = [];
     const entries = Array.from(groupPendingBuckets.entries());
     for (let index = 0; index < entries.length; index += 1) {
         const [gid, bucket] = entries[index];
-        const due = bucket.events.length >= maxItems || (windowMs > 0 && now - bucket.firstAt >= windowMs);
-        if (!due || bucket.events.length === 0) {
+        // 单群安全保留上限（Epic G0：废弃"桶满提前 flush"旧语义）：
+        // 超过上限不提前发送，只保留最新 maxItems 条并累计 overflow/dropCount。
+        if (bucket.events.length > maxItems) {
+            const droppedCount = bucket.events.length - maxItems;
+            bucket.events = bucket.events.slice(-maxItems);
+            bucket.overflowCount = (bucket.overflowCount || 0) + droppedCount;
+        }
+        const dueWindow = windowMs > 0 && now - bucket.firstAt >= windowMs;
+        if (!dueWindow || bucket.events.length === 0) {
             continue;
         }
         groupPendingBuckets.delete(gid);
-        try {
-            const flushResult = await flushGroupBucketAsync(config, gid, bucket);
-            return { flushed: true, result: flushResult };
+        due.push({ gid, bucket });
+    }
+    if (due.length === 0) {
+        return { flushed: false, results: [], error: "" };
+    }
+    // Epic G1：到期群有限并发 flush（groupFlushConcurrency，默认 3，clamp 1～8）；
+    // 不同群对应不同 chatId，可跨群并发；同一群内事件串行处理。
+    const results = [];
+    let nextIndex = 0;
+    const flushWorkerAsync = async () => {
+        while (nextIndex < due.length) {
+            const current = due[nextIndex];
+            nextIndex += 1;
+            try {
+                const flushResult = await flushGroupBucketAsync(config, current.gid, current.bucket);
+                results.push({ flushed: true, result: flushResult });
+            }
+            catch (error) {
+                const errorText = (0, core.safeErrorMessage)(error);
+                const removedKeys = [];
+                for (let eventIndex = 0; eventIndex < current.bucket.events.length; eventIndex += 1) {
+                    const eventKey = buildEventKey(current.bucket.events[eventIndex]);
+                    if (!eventKey) {
+                        continue;
+                    }
+                    const failCount = await incrementEventProcessFailCountAsync(eventKey, errorText);
+                    if (failCount >= MAX_EVENT_PROCESS_FAIL_COUNT) {
+                        await markEventProcessFailedAsync(eventKey, errorText);
+                        removedKeys.push(eventKey);
+                    }
+                }
+                if (removedKeys.length > 0) {
+                    await gateway.removeGatewayEvents(removedKeys, 8000);
+                }
+                results.push({ flushed: false, error: errorText });
+            }
         }
-        catch (error) {
-            const errorText = (0, core.safeErrorMessage)(error);
-            const removedKeys = [];
-            for (let eventIndex = 0; eventIndex < bucket.events.length; eventIndex += 1) {
-                const eventKey = buildEventKey(bucket.events[eventIndex]);
-                if (!eventKey) {
-                    continue;
-                }
-                const failCount = await incrementEventProcessFailCountAsync(eventKey, errorText);
-                if (failCount >= MAX_EVENT_PROCESS_FAIL_COUNT) {
-                    await markEventProcessFailedAsync(eventKey, errorText);
-                    removedKeys.push(eventKey);
-                }
-            }
-            if (removedKeys.length > 0) {
-                await gateway.removeGatewayEvents(removedKeys, 8000);
-            }
-            return { flushed: false, error: errorText };
+    };
+    const workers = [];
+    for (let index = 0; index < concurrency; index += 1) {
+        workers.push(flushWorkerAsync());
+    }
+    await Promise.all(workers);
+    const firstError = "";
+    for (let index = 0; index < results.length; index += 1) {
+        if (!results[index].flushed && results[index].error) {
+            firstError = results[index].error;
         }
     }
-    return { flushed: false };
+    return { flushed: results.some((item) => item.flushed), results, error: firstError };
 }
 function classifyEvent(config, event, serviceState) {
     const scene = (0, core.asText)(event.scene).trim().toLowerCase();
@@ -997,6 +1176,13 @@ function classifyEvent(config, event, serviceState) {
     }
     if (scene === "group" && !config.groupEnabled) {
         return { action: "skip", reason: "group_disabled" };
+    }
+    // Epic G1：群消息分流——at_only 模式下普通群消息只进上下文缓存，不唤醒 AI
+    if (scene === "group") {
+        const messageMode = (0, core.asText)(config.groupMessageMode).trim().toLowerCase() || "at_only";
+        if (messageMode === "at_only" && !isGroupAtEventType(eventType)) {
+            return { action: "context_only", reason: "group_message_not_at" };
+        }
     }
     if (scene !== "c2c" && scene !== "group") {
         return { action: "skip", reason: "unsupported_scene" };
@@ -1123,7 +1309,7 @@ async function processAutoReplyQueueOnceAsync(source) {
     const queue = Array.isArray(queueResult.events) ? queueResult.events : [];
     if (queue.length === 0) {
         const flushOutcome = await flushDueGroupBucketsAsync(activeContext.config);
-        const flushItems = flushOutcome.flushed ? [flushOutcome.result] : [];
+        const flushItems = flushOutcome.flushed ? flushOutcome.results.map((item) => item.result) : [];
         await updateAutoReplyRuntimeAsync({
             running: autoReplyTimerId != null,
             status: "idle",
@@ -1145,8 +1331,8 @@ async function processAutoReplyQueueOnceAsync(source) {
     const processedItems = [];
     const skippedItems = [];
     let queueRemainingCount = queue.length;
+    const latestContext = await readActiveAutoReplyContextAsync();
     for (let index = 0; index < queue.length && processedCount < 1; index += 1) {
-        const latestContext = await readActiveAutoReplyContextAsync();
         if (latestContext.disabledReason) {
             await stopAutoReplyLoopInternal("manual_stop");
             return {
@@ -1176,8 +1362,29 @@ async function processAutoReplyQueueOnceAsync(source) {
             queueRemainingCount -= 1;
             continue;
         }
+        // Epic G1：普通群消息（at_only 模式下非 @ 消息）→ 只进上下文环形缓存，不唤醒 AI；
+        // 已缓存则从 Gateway 队列移除，避免队列膨胀；缓存供 agent 按需查询（G2）。
+        if (decision.action === "context_only") {
+            pushToGroupContextCache(latestContext.config, event);
+            groupCacheStateDirty.dirty = true;
+            skippedCount += 1;
+            skippedItems.push({
+                eventKey,
+                reason: decision.reason ?? "context_only"
+            });
+            if (eventKey) {
+                await gateway.removeGatewayEvents([eventKey], 8000);
+            }
+            queueRemainingCount -= 1;
+            continue;
+        }
         const eventScene = (0, core.asText)(event.scene).trim().toLowerCase();
-        const aggregateWindowMs = (0, core.parsePositiveInt)(latestContext.config.groupAggregateWindowMs, "groupAggregateWindowMs", 0);
+        // 所有被处理的群消息都进上下文缓存（@ 消息作为 anchor，普通消息作为前后文），落盘边界见 V2-BLUEPRINT §12.1
+        if (eventScene === "group") {
+            pushToGroupContextCache(latestContext.config, event);
+            groupCacheStateDirty.dirty = true;
+        }
+        const aggregateWindowMs = Number(latestContext.config.groupAggregateWindowMs) || 0;
         if (eventScene === "group" && aggregateWindowMs > 0) {
             const groupOpenId = (0, core.asText)(event.groupOpenId).trim();
             if (groupOpenId) {
@@ -1237,8 +1444,13 @@ async function processAutoReplyQueueOnceAsync(source) {
     }
     const flushOutcome = await flushDueGroupBucketsAsync(latestContext.config);
     if (flushOutcome.flushed) {
-        processedCount += 1;
-        processedItems.push(flushOutcome.result);
+        for (let index = 0; index < flushOutcome.results.length; index += 1) {
+            const flushItem = flushOutcome.results[index];
+            if (flushItem.flushed) {
+                processedCount += 1;
+                processedItems.push(flushItem.result);
+            }
+        }
     }
     const currentRuntime = await readAutoReplyRuntimeAsync();
     await updateAutoReplyRuntimeAsync({
@@ -1266,7 +1478,16 @@ async function stopAutoReplyLoopInternal(reason, errorText = "") {
         clearInterval(autoReplyTimerId);
         autoReplyTimerId = null;
     }
+    // Epic G1：停止前先把内存缓存落盘（保留"当天"数据供下次启动按恢复窗口过滤后恢复），再清内存
+    try {
+        await persistGroupRuntimeStateAsync();
+    }
+    catch (error) {
+        console.warn(`[qqbot_auto_reply] persist before stop failed: ${(0, core.safeErrorMessage)(error)}`);
+    }
     groupPendingBuckets.clear();
+    groupContextCache.clear();
+    groupCacheStateDirty.dirty = false;
     return await updateAutoReplyRuntimeAsync({
         running: false,
         status: reason === "manual_stop" ? "stopped" : "error",
@@ -1297,6 +1518,13 @@ async function tickAutoReplyLoopAsync(source) {
         await recordAutoReplyTickErrorAsync(message);
     }
     finally {
+        // Epic G1：每轮结束把内存缓存/桶的变更落盘（dirty 时才写），保证重启可恢复"当天"数据
+        try {
+            await persistGroupRuntimeStateAsync();
+        }
+        catch (error) {
+            console.warn(`[qqbot_auto_reply] persist after tick failed: ${(0, core.safeErrorMessage)(error)}`);
+        }
         autoReplyTickActive = false;
     }
 }
@@ -1335,6 +1563,16 @@ async function ensureQQBotAutoReplyLoopStarted(source = "manual_start") {
         };
     }
     await gateway.ensureGatewayStarted({ timeout_ms: 8000 });
+    // Epic G1：启动时从持久化状态恢复"当天"缓存/聚合桶（恢复窗口过滤，默认 24h）
+    try {
+        const restoreResult = await restoreGroupRuntimeStateAsync(config);
+        if (restoreResult.restored) {
+            console.log(`[qqbot_auto_reply] restored ${restoreResult.recoveredBucketCount} bucket(s), ${restoreResult.recoveredContextCount} context group(s), window=${restoreResult.recoveryMaxAgeMs}ms`);
+        }
+    }
+    catch (error) {
+        console.warn(`[qqbot_auto_reply] restore failed: ${(0, core.safeErrorMessage)(error)}`);
+    }
     autoReplyTimerId = setInterval(() => {
         void tickAutoReplyLoopAsync("interval");
     }, config.pollIntervalMs);
@@ -1360,6 +1598,7 @@ async function qqbot_auto_reply_configure(params = {}) {
     try {
         const before = await readAutoReplyConfigAsync();
         const patch = {};
+        const configChanges = [];
         if ((0, core.hasOwn)(params, "enabled")) {
             patch.enabled = (0, core.parseOptionalBoolean)(params.enabled, "enabled") === true;
         }
@@ -1396,20 +1635,60 @@ async function qqbot_auto_reply_configure(params = {}) {
         if ((0, core.hasOwn)(params, "group_aggregate_window_ms")) {
             patch.groupAggregateWindowMs = (0, core.parsePositiveInt)(params.group_aggregate_window_ms, "group_aggregate_window_ms", before.groupAggregateWindowMs);
         }
+        if ((0, core.hasOwn)(params, "group_ai_timeout_ms")) {
+            patch.groupAiTimeoutMs = (0, core.parsePositiveInt)(params.group_ai_timeout_ms, "group_ai_timeout_ms", before.groupAiTimeoutMs);
+        }
         if ((0, core.hasOwn)(params, "group_waifu_flush_sentences")) {
             patch.groupWaifuFlushSentences = (0, core.parsePositiveInt)(params.group_waifu_flush_sentences, "group_waifu_flush_sentences", before.groupWaifuFlushSentences);
         }
         if ((0, core.hasOwn)(params, "proactive_c2c_openid")) {
             patch.proactiveC2cOpenId = (0, core.asText)(params.proactive_c2c_openid).trim();
         }
-        if ((0, core.hasOwn)(params, "group_aggregate_max_items")) {
-            patch.groupAggregateMaxItems = (0, core.parsePositiveInt)(params.group_aggregate_max_items, "group_aggregate_max_items", before.groupAggregateMaxItems);
+        if ((0, core.hasOwn)(params, "group_aggregate_max_items") && !(0, core.hasOwn)(params, "group_max_items")) {
+            patch.groupMaxItems = (0, core.parsePositiveInt)(params.group_aggregate_max_items, "group_aggregate_max_items", before.groupMaxItems);
+            configChanges.push("group_aggregate_max_items → groupMaxItems（旧语义“桶满提前 flush”已废弃）");
+        }
+        if ((0, core.hasOwn)(params, "group_max_items")) {
+            patch.groupMaxItems = (0, core.parsePositiveInt)(params.group_max_items, "group_max_items", before.groupMaxItems);
         }
         if ((0, core.hasOwn)(params, "group_nickname_enabled")) {
             patch.groupNicknameEnabled = (0, core.parseOptionalBoolean)(params.group_nickname_enabled, "group_nickname_enabled") === true;
         }
         if ((0, core.hasOwn)(params, "c2c_fixed_bindings")) {
-            patch.c2cFixedBindings = normalizeC2cFixedBindings(params.c2c_fixed_bindings);
+            patch.c2cFixedBindings = bridgeConfig.normalizeC2cFixedBindings(params.c2c_fixed_bindings);
+        }
+        // ---- 14:32 群窗口 / 上下文 / 容量新增参数 ----
+        if ((0, core.hasOwn)(params, "group_message_mode")) {
+            patch.groupMessageMode = (0, core.asText)(params.group_message_mode).trim().toLowerCase();
+        }
+        if ((0, core.hasOwn)(params, "group_context_mode")) {
+            patch.groupContextMode = (0, core.asText)(params.group_context_mode).trim().toLowerCase();
+        }
+        if ((0, core.hasOwn)(params, "group_context_enabled")) {
+            patch.groupContextEnabled = (0, core.parseOptionalBoolean)(params.group_context_enabled, "group_context_enabled") === true;
+        }
+        if ((0, core.hasOwn)(params, "group_context_before")) {
+            patch.groupContextBefore = (0, core.parsePositiveInt)(params.group_context_before, "group_context_before", before.groupContextBefore);
+        }
+        if ((0, core.hasOwn)(params, "group_context_after")) {
+            patch.groupContextAfter = (0, core.parsePositiveInt)(params.group_context_after, "group_context_after", before.groupContextAfter);
+        }
+        if ((0, core.hasOwn)(params, "group_context_limit")) {
+            patch.groupContextLimit = (0, core.parsePositiveInt)(params.group_context_limit, "group_context_limit", before.groupContextLimit);
+        }
+        if ((0, core.hasOwn)(params, "group_global_cache_max_items")) {
+            patch.groupGlobalCacheMaxItems = (0, core.parsePositiveInt)(params.group_global_cache_max_items, "group_global_cache_max_items", before.groupGlobalCacheMaxItems);
+        }
+        if ((0, core.hasOwn)(params, "group_flush_concurrency")) {
+            patch.groupFlushConcurrency = (0, core.parsePositiveInt)(params.group_flush_concurrency, "group_flush_concurrency", before.groupFlushConcurrency);
+        }
+        if ((0, core.hasOwn)(params, "group_cache_recovery_max_age_ms")) {
+            patch.groupCacheRecoveryMaxAgeMs = (0, core.parsePositiveInt)(params.group_cache_recovery_max_age_ms, "group_cache_recovery_max_age_ms", before.groupCacheRecoveryMaxAgeMs);
+        }
+        // Epic G1：显式关闭群聊开关时，清理群侧待处理状态（聚合桶 + 上下文缓存），Gateway 保持运行
+        if ((0, core.hasOwn)(params, "group_enabled") && !(0, core.parseOptionalBoolean)(params.group_enabled, "group_enabled")) {
+            clearGroupRuntimeState();
+            await persistGroupRuntimeStateAsync();
         }
         let config = await updateAutoReplyConfigAsync(patch);
         const snapshot = await (0, state.readConfigSnapshotAsync)();
@@ -1437,6 +1716,7 @@ async function qqbot_auto_reply_configure(params = {}) {
             success: true,
             packageVersion: core.PACKAGE_VERSION,
             config,
+            changes: configChanges,
             status: await buildAutoReplyStatusAsync()
         };
     }
@@ -1531,7 +1811,7 @@ async function qqbot_pro_bridge_bind_c2c(params = {}) {
         throw new Error("openid and target_chat_id are required");
     }
     const config = await readAutoReplyConfigAsync();
-    const fixed = normalizeC2cFixedBindings(config.c2cFixedBindings)
+    const fixed = bridgeConfig.normalizeC2cFixedBindings(config.c2cFixedBindings)
         .filter((item) => item.openid !== openid);
     const binding = {
         openid,
@@ -1555,6 +1835,73 @@ async function qqbot_pro_bridge_list_image_folders() {
         success: true,
         folders: (0, core.readImageFolders)(),
         env: "QQBOT_PRO_IMAGE_FOLDERS"
+    };
+}
+
+/**
+ * Epic G2（核心）：按群查询持久化上下文缓存（agent_on_demand 数据源）。
+ * 默认以最后一条缓存消息为 anchor，取前后各 groupContextBefore/After 条（默认各5），
+ * 单次最多 groupContextLimit（默认20）；查询结果只发给模型、不落 Operit 对话（落盘边界见蓝图 §12.1）。
+ */
+async function qqbot_pro_group_context(params = {}) {
+    const groupOpenId = (0, core.asText)(params.group_openid).trim();
+    if (!groupOpenId) {
+        throw new Error("group_openid is required");
+    }
+    const config = await readAutoReplyConfigAsync();
+    const entry = groupContextCache.get(groupOpenId);
+    if (!entry || entry.events.length === 0) {
+        return { success: true, groupOpenId, events: [], note: "no_cached_context" };
+    }
+    const events = entry.events;
+    let anchorIndex = -1;
+    const anchorKey = (0, core.firstNonBlank)((0, core.asText)(params.anchor_event_key).trim(), (0, core.asText)(params.anchor_msg_id).trim());
+    if (anchorKey) {
+        for (let index = 0; index < events.length; index += 1) {
+            if (buildEventKey(events[index]) === anchorKey) {
+                anchorIndex = index;
+                break;
+            }
+        }
+    }
+    else if (params.anchor_index !== undefined && params.anchor_index !== null && params.anchor_index !== "") {
+        anchorIndex = Number(params.anchor_index);
+    }
+    else {
+        anchorIndex = events.length - 1;
+    }
+    if (!(anchorIndex >= 0 && anchorIndex < events.length)) {
+        anchorIndex = events.length - 1;
+    }
+    const limit = Math.min(Math.max(Number(config.groupContextLimit) || 20, 0), 20);
+    const defaultBefore = Math.min(Math.max(Number(config.groupContextBefore) || 5, 0), limit);
+    const defaultAfter = Math.min(Math.max(Number(config.groupContextAfter) || 5, 0), limit);
+    const before = params.before !== undefined && params.before !== null && params.before !== "" ? Math.min(Math.max(Number(params.before), 0), limit) : defaultBefore;
+    const after = params.after !== undefined && params.after !== null && params.after !== "" ? Math.min(Math.max(Number(params.after), 0), limit) : defaultAfter;
+    const start = Math.max(0, anchorIndex - before);
+    const end = Math.min(events.length - 1, anchorIndex + after);
+    let selected = events.slice(start, end + 1);
+    if (selected.length > limit) {
+        selected = selected.slice(-limit);
+    }
+    const items = selected.map((ev) => ({
+        eventKey: buildEventKey(ev),
+        eventType: (0, core.asText)(ev.eventType).trim(),
+        isAtEvent: isGroupAtEventType((0, core.asText)(ev.eventType)),
+        member: `QQ${shortOpenId((0, core.firstNonBlank)((0, core.asText)(ev.userOpenId).trim(), (0, core.asText)(ev.authorId).trim()))}`,
+        sentAt: (0, core.asText)(ev.timestamp).trim(),
+        receivedAt: (0, core.asText)(ev.receivedAt).trim(),
+        content: (0, core.asText)(ev.content).trim()
+    }));
+    return {
+        success: true,
+        groupOpenId,
+        anchorIndex,
+        before,
+        after,
+        limit,
+        totalCached: events.length,
+        events: items
     };
 }
 
@@ -1614,3 +1961,4 @@ exports.qqbot_pro_bridge_contacts = qqbot_pro_bridge_contacts;
 exports.qqbot_pro_bridge_bind_c2c = qqbot_pro_bridge_bind_c2c;
 exports.qqbot_pro_bridge_set_proactive_target = qqbot_pro_bridge_set_proactive_target;
 exports.qqbot_pro_bridge_list_image_folders = qqbot_pro_bridge_list_image_folders;
+exports.qqbot_pro_group_context = qqbot_pro_group_context;
