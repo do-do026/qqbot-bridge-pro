@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### 群链路全通 + 三连修复（02:13-02:24）
+- **开窗成功**：群 @/关键词触发 → 自动创建 `[QQ][群]` 对话窗 ✅
+- **T041**：群聚合 `waifu:true` + 无流式收集器 → AI 回复恒空；修复：群聚合显式 `waifu:false`（用自己的群聊 5 句切分）
+- **T042**：机器人群内 member_openid ≠ botUserId，@ 识别漏判；修复：content `<@xxx>` 提取 + mentions 交叉验证
+- **新需求入蓝图（G7）**：群成员身份绑定（初尘 openid → "我"，其他群友代号），昵称获取后续评估；实施顺序插在 G3 后
+- **文档**：V2-BLUEPRINT 新增 §13 官方文档参考（Intents/全量模式/时效等关键结论）；TROUBLESHOOTING T041/T042；本 CHANGELOG；HANDOFF/STATUS 同步
+- 测试 35/35 全过；已烧录运行（keyword_or_at + 关键词[渡渡,dodo,渡渡渡渡] + 5s 窗口）
+
 ### T039 @消息误杀修复 + keyword_or_at 关键词触发（01:5x-02:0x）
 - **根因**：QQ「接收所有消息」全量模式下 @ 消息以 `GROUP_MESSAGE_CREATE` 推送、@ 标记在 `mentions`；Gateway 未透传 mentions + 桥只认 AT 事件类型 → @ 消息被 `group_message_not_at` 误杀
 - **修复**：Gateway 透传 mentions；`isGroupAtEventType` 加 mentions 兜底（id/user_openid/member_openid 匹配机器人）
