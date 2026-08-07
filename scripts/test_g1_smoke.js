@@ -92,6 +92,25 @@ function makeEvent(overrides) {
     const c2cEvent = { scene: "c2c", eventType: "C2C_MESSAGE_CREATE", content: "hi", rawPayload: {} };
     assert(bridgeAuto._internal.classifyEvent(cfg, c2cEvent, svc).action === "process", "C2C 消息 → process");
 
+    // 2.5) T039：全量模式下 @ 标记在 mentions（GROUP_MESSAGE_CREATE + mentions 含机器人 → 视为 @ 触发）
+    const svcWithBot = { botUserId: "BOT123" };
+    const mentionEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡渡渡——", mentions: [{ id: "USER1" }, { id: "BOT123" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, mentionEvent, svcWithBot).action === "process", "GROUP_MESSAGE_CREATE + mentions 含机器人（at_only）→ process（T039）");
+    const mentionEvent2 = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡渡渡——", mentions: [{ id: "USER1", member_openid: "BOT123" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, mentionEvent2, svcWithBot).action === "process", "GROUP_MESSAGE_CREATE + mentions.member_openid 含机器人 → process（T039）");
+    const noMentionEvent = makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡渡渡——", mentions: [{ id: "USER1" }] });
+    assert(bridgeAuto._internal.classifyEvent(cfg, noMentionEvent, svcWithBot).action === "context_only", "GROUP_MESSAGE_CREATE + mentions 不含机器人 → context_only");
+
+    // 2.6) keyword_or_at 模式：关键词触发
+    const kwCfg = { ...cfg, groupMessageMode: "keyword_or_at", groupKeywords: ["渡渡", "dodo"] };
+    assert(bridgeAuto._internal.classifyEvent(kwCfg, makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "渡渡在吗" }), svcWithBot).action === "process", "keyword_or_at：命中关键词 → process");
+    assert(bridgeAuto._internal.classifyEvent(kwCfg, makeEvent({ eventType: "GROUP_MESSAGE_CREATE", content: "晚上好呀" }), svcWithBot).action === "context_only", "keyword_or_at：未命中关键词 → context_only");
+    assert(bridgeAuto._internal.classifyEvent(kwCfg, mentionEvent, svcWithBot).action === "process", "keyword_or_at：mentions @ → process");
+    // groupKeywords 归一化（数组 / JSON / 逗号分隔）
+    assert(JSON.stringify(bridgeConfig.normalizeGroupKeywords(["渡渡", "dodo"])) === '["渡渡","dodo"]', "normalizeGroupKeywords 数组");
+    assert(JSON.stringify(bridgeConfig.normalizeGroupKeywords('["渡渡","dodo"]')) === '["渡渡","dodo"]', "normalizeGroupKeywords JSON 字符串");
+    assert(JSON.stringify(bridgeConfig.normalizeGroupKeywords("渡渡,dodo，测试")) === '["渡渡","dodo","测试"]', "normalizeGroupKeywords 逗号/顿号分隔");
+
     // 3) 上下文缓存容量：单群 30 / 全局 100
     bridgeAuto._internal.clearGroupRuntimeState();
     for (let i = 0; i < 35; i += 1) {
