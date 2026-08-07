@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro: G7 group member binding minimal impl (初尘 bound) + docs 2026-08-08"
+COMMIT_MSG = "qqbot-pro: 群链路全闭环 (T043 resource refresh fix + T044 post-install restart SOP) docs 2026-08-08"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
