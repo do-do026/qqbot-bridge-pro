@@ -274,4 +274,36 @@ await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
 
 **关联**：T037（readResource 参数错误）同属"改 src 忘 dist"类问题；建议后续做 src↔dist 一致性自动校验。
 
+---
+
+### T041：群聚合 waifu:true + onIntermediateResult=undefined → AI 回复永远为空（empty response）
+
+**现象**：群 @消息触发后，Operit 群对话窗里 user 消息正常落盘、但 AI 回复 content 全空（三次尝试都一样）；records 标记 `group_ai_timeout: empty response`。手动在同一个群对话窗发消息（不带 waifu）却回复正常 → 排除模型/角色卡/对话问题。
+
+**根因**：`generateAiReplyAsync` 对单聊和群聚合共用 `sendMessageStreaming(..., { waifu: config.waifu=true })`。**waifu 模式下回复通过 onIntermediateResult 流式回调输出**；单聊传了流式收集器所以正常，**群聚合调用时传了 `onIntermediateResult: undefined`** → 流式内容全部丢失 → `sendResult.aiResponse` 为空 → 判定 empty response。
+
+**修复**：
+1. `generateAiReplyAsync` 支持 `options.waifu` 覆盖（默认仍用 config.waifu）。
+2. 群聚合调用显式传 `waifu: false`——群聚合有自己的群聊 5 句切分（`sendReplyChunksToQQAsync`），不需要 waifu 流式；直接拿完整 aiResponse 再切分。
+3. C2C 路径不变（仍 config.waifu + 流式收集器）。
+
+**验证**：修复后 Operit 群对话回复完整 ✅（回传 QQ 链路见 T042 发送侧，发送失败另见后续记录）。
+
+---
+
+### T042：全量模式下机器人 member_openid ≠ botUserId，@ 识别仍漏判 → content `<@xxx>` + mentions 交叉验证
+
+**现象**：初尘在群发 `@渡渡 两点也困困舔舔他`（content 为 `<@D02B97AF...> 两点也困困舔舔他`），桥仍 `group_message_not_at_nor_keyword` 跳过——内容不含关键词，且 mentions 里的机器人 id（D02B97AF…，群内 member_openid）≠ botUserId（13673075230209511411，全局 user id），T039 的 mentions 直接比对匹配失败。
+
+**根因**：QQ 开放平台机器人在群内的 `member_openid` 与 `READY` 返回的全局 `user.id`（botUserId）不是同一个值；全量模式下 @ 标记同时体现在 content 的 `<@xxx>` 和 mentions 字段。
+
+**修复**：
+1. 新增 `extractAtTargetIds(content)`：正则提取 content 中所有 `<@id>`。
+2. `isGroupAtEventType` 增加 T042 兜底：**@ 目标出现在 mentions（官方"消息中@的用户列表"）且不是发送者自己 → 视为 @ 触发**。
+   - 精确路径（mentions 含 botUserId）保留在最前。
+   - 宽松路径会把"@其他群友"也判定为触发（测试场景可接受；精确识别机器人 member_openid 留待 G7 群成员身份绑定/管理端开 GROUP_AT_MESSAGE_CREATE 事件）。
+3. 冒烟测试新增 5 用例（@机器人跨 id 识别、自己@自己排除、@群友宽松识别、多 @提取），35/35 通过。
+
+**关联**：T039（mentions 识别引入）、G7（群成员身份绑定，可学习机器人 member_openid 做到精确识别）。
+
 **验证**：.toolpkg 导入后重启 Operit，侧边栏/工具箱是否出现"QQ Bot Bridge Pro"入口。
