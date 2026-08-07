@@ -209,4 +209,38 @@
 
 **修复**：main.js 改用 `registerUiRoute` + `registerNavigationEntry`（screen 传 `dist/ui/qqbot_settings/index.ui.js` 字符串路径），并保留 try-catch（UI 失败不拖垮工具/hooks）。
 
+---
+
+### T037：ToolPkg.readResource 第二参数是 outputFileName，不是完整路径（Gateway 资源从未解出）
+
+**现象**：Operit 重启后调用 `qqbot_pro_gateway_start` 报空错误（`Step error:` 无内容）；`gateway_service.log` 只有一行 `python3: can't open file '.../qqbot_pro_gateway.py': No such file or directory`；`STATE_DIR` 里 py 文件永远不存在。
+
+**根因**：`qqbot_pro_gateway.js` 两处启动逻辑（`qqbot_pro_gateway_start` 与 `ensureGatewayStarted`）都写成：
+```js
+await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
+```
+但类型定义是 `readResource(key: string, outputFileName?: string): Promise<string>`——**第二参数是文件名，不是完整目标路径**；返回值才是解出的临时路径。错误用法导致资源要么写进临时目录（名字错乱）、要么静默失败，返回值被丢弃。随后 `nohup python3 '完整路径'` 找不到脚本，只留下空错误。旧工程 `qqbot-bridge-pro` 没有此坑，是因为它从未重新烧录后重启过 Gateway；原包无此坑是因为其 Gateway 内嵌 JS 不依赖资源文件。
+
+**修复**（2026-08-08）：
+1. 新增公共函数 `ensureGatewayScriptAsync()`：`readResource(key, SERVICE_FILE)` 拿临时路径 → `Tools.Files.copy(tmp, target)` 落到 STATE_DIR；readResource 不可用时兜底从开发目录复制；全失败抛明确错误。
+2. 两处启动逻辑统一改调 `ensureGatewayScriptAsync()`。
+3. 顺带清理合并残留：`ensureGatewayStarted` 里的 `--source 'qqbot_bridge_pro'` → `'qqbot_pro_auto'`、executorKey `qqbot_bridge_pro_gateway` → `qqbot_pro_gateway`、METADATA name 残留。
+
+**验证**：删除 STATE_DIR 的 py 后 `qqbot_pro_gateway_start` 自动解出 37759B 脚本并 connected=true ✅
+
+---
+
+### T038：debug_install_toolpkg 默认 reset_subpackage_states=true，烧录后子包被重置为未导入
+
+**现象**：烧录新包后 `use_package("qqbot_pro_gateway")` 报 `Package not found`；`list_sandbox_packages` 显示三个子包 `enabled:false, imported:false`。
+
+**根因**：`debug_install_toolpkg` 的 `reset_subpackage_states` 参数默认 `true`，会按 manifest 默认值重置子包启用/导入状态（对已安装包是全新状态）。
+
+**修复/规避**：
+1. 烧录时传 `reset_subpackage_states=false` 可保留状态（但首次安装时子包仍是默认 enabled_by_default 状态，通常也要手动确认）；
+2. 烧录后若子包状态被重置，逐个 `operit_editor:set_sandbox_package_enabled(package_name, true)` 重新启用，再 `use_package` 激活；
+3. 重新烧录后工具名会短暂不可用（元数据刷新），重新 use_package 即恢复。
+
+**关联**：T009（会话快照）、T027/T035（多包子包状态混乱）
+
 **验证**：.toolpkg 导入后重启 Operit，侧边栏/工具箱是否出现"QQ Bot Bridge Pro"入口。
