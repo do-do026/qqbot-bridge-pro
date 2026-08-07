@@ -1,12 +1,12 @@
 /*
- * qqbot-bridge-pro 状态持久化（移植自原包 qqbot_state.js）
+ * qqbot-pro 状态持久化（合并自 qqbot-bridge-pro）
  * 依赖：shared/core.js（工具函数）
- * 状态目录：getPluginConfigDir(com.operit.qqbot_bridge_pro)，与原包物理隔离
+ * 状态目录：getPluginConfigDir(com.operit.qqbot_pro)，与原包物理隔离
  */
 "use strict";
 const core = require("./core.js");
 
-const TOOLPKG_ID = "com.operit.qqbot_bridge_pro";
+const TOOLPKG_ID = "com.operit.qqbot_pro";
 const CONFIG_FILE_NAME = "config.json";
 const LOG_FILE_NAME = "gateway_service.log";
 const AUTO_REPLY_STATE_FILE_NAME = "auto_reply_state.json";
@@ -116,7 +116,10 @@ function sanitizeAutoReplyStateStore(value) {
     return {
         runtime: core.hasOwn(value, "runtime") && core.isObject(value.runtime) ? cloneJsonObject(value.runtime) : {},
         bindings: core.hasOwn(value, "bindings") && core.isObject(value.bindings) ? cloneJsonObject(value.bindings) : {},
-        records: core.hasOwn(value, "records") && core.isObject(value.records) ? cloneJsonObject(value.records) : {}
+        records: core.hasOwn(value, "records") && core.isObject(value.records) ? cloneJsonObject(value.records) : {},
+        // Epic G1：群聚合桶与上下文缓存的持久化镜像（恢复窗口过滤在 bridge_auto 侧做）
+        buckets: core.hasOwn(value, "buckets") && core.isObject(value.buckets) ? cloneJsonObject(value.buckets) : {},
+        context: core.hasOwn(value, "context") && core.isObject(value.context) ? cloneJsonObject(value.context) : {}
     };
 }
 async function readPersistedConfigAsync() {
