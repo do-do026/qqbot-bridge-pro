@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-09
+
+### Epic G4 统一 Waifu chunker——完成（01:13-01:17）
+- **新模块** `package/src/shared/waifu_chunker.js`：纯 JS、无 Java 依赖，单聊流式 + 群聊完整文本共用同一状态机（禁止再维护两套正则）
+- **规则落地**：句末计数 `。！？\n`；连续换行只计 1 句（跨 chunk 边界连续跟踪）；输出时连续换行归一化；400 字符独立安全兜底
+- **集成**：`bridge_auto.js` 的 `splitReplyBySentenceCount` 委托 `splitText`；`processSingleEventAsync` 流式改用 `WaifuChunker`（原 pendingBuffer/SENTENCE_END_REGEX 状态机删除）
+- **行为改进**：单聊流式从"凑够即整段发"改为精确切分（8 句 limit3 → 3/3/2，而非 8 句一条）
+- **测试** `scripts/test_g4_waifu_chunker.js`：29/29 通过（emoji/无标点 400 兜底/连续空行/跨 chunk 换行/流式累积/与旧语义一致性）；G1 冒烟 40/40 无回归
+- 已烧录、桥已重启（新代码生效）
+
 ## 2026-08-08
 
 ### 🎉 群链路全闭环（03:07-03:12）+ T043/T044
