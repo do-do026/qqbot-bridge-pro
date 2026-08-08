@@ -2,6 +2,13 @@
 
 ## 2026-08-09
 
+### T045 修复：HTTP 200 + 业务错误码误判成功（01:29-01:32）
+- **现象**：G4 上线后实测长回复切 3 段，Operit 有完整回复但 QQ 只收到前半段；桥记录全部"成功"
+- **根因**：`requestJson` 只按 HTTP 状态码判成功；QQ 平台业务失败可能 HTTP 200 + `{"code":非0}` → 静默丢失后半段
+- **修复**：①requestJson 增加 code/retcode 业务码校验（≠0 判失败）；②流式发送记录 `sendResult.segmentResults`（每段 msgSeq/code/message/responseId）供调试
+- **待验证**：下次长回复实测后查 segmentResults 确认后段是否被平台拒绝及错误码
+- 测试 G1 40/40 + G4 29/29；已烧录、桥已重启
+
 ### Epic G4 统一 Waifu chunker——完成（01:13-01:17）
 - **新模块** `package/src/shared/waifu_chunker.js`：纯 JS、无 Java 依赖，单聊流式 + 群聊完整文本共用同一状态机（禁止再维护两套正则）
 - **规则落地**：句末计数 `。！？\n`；连续换行只计 1 句（跨 chunk 边界连续跟踪）；输出时连续换行归一化；400 字符独立安全兜底
