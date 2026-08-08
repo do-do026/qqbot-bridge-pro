@@ -324,6 +324,24 @@ await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
 
 ---
 
+### T045：HTTP 200 + 业务错误码被误判为发送成功（流式多段回复后半段静默丢失）
+
+**现象**：G4 统一 chunker 上线后实测，长回复切 3 段（streamedChunkCount=3），Operit 对话内 AI 回复完整，但 QQ 只收到前半段；桥记录全部 replied / failCount=0 / 最后一段有 response id——**看起来全成功，实际后半段没送达**（2026-08-09 01:25 初尘实测反馈）。
+
+**根因**：`core.js requestJson` 的 success 只按 **HTTP 状态码**（2xx）判断。QQ 开放平台部分业务失败返回 **HTTP 200 + 业务错误码**（`{"code":非0,"message":...}`），导致桥把"平台已拒绝"误判为"发送成功"，无任何报错记录。
+
+**修复**（已烧录 2026-08-09 01:32）：
+1. `requestJson` 增加业务码校验：`json.code`/`json.retcode` 存在且 ≠0 → `success=false`（成功响应无 code 字段，行为不变）；返回新增 `code`/`message` 字段便于调试。
+2. `processSingleEventAsync` 流式路径新增 `segmentResults` 数组（msgSeq/scene/code/message/ok/responseId），挂在 sendResult 上——**下次实测长回复后查 status 即可看到每段的真实平台返回**，定位到底哪一段被拒、用什么错误码。
+
+**待验证（初尘睡醒后继续）**：
+- 再触发一次长回复（如"讲个长故事"），查 `lastProcessedItems[].sendResult.segmentResults` 的每段 code/message。
+- 若后段被拒（如频控/被动回复次数限制），方案：段间加发送间隔、或 C2C 改单条超长合并、或按官方限制调整切分策略。
+
+**关联**：G4（统一 chunker 让多段发送成为常态，暴露此问题）、T041（同为发送链路静默问题）。
+
+---
+
 ### T044：debug_install_toolpkg 烧录后，运行中的桥循环被重置为停止
 
 **现象**：03:08 启动桥（running）→ 03:09 烧录 T043 → 用户发消息无响应；查桥状态 `running:false`，runtime startedAt 被还原为上一次 stop 的时间，Gateway 队列积压 1 条事件。
