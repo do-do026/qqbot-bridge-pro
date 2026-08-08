@@ -6,15 +6,16 @@
 
 ---
 
-## 0.5. 当前运行状态（2026-08-09 01:1x 快照）
+## 0.5. 当前运行状态（2026-08-09 01:3x 快照）
 
 - **✅ G4 统一 Waifu chunker 已完成（01:17 烧录生效）**：`waifu_chunker.js` 单聊流式/群聊完整文本共用状态机；`。！？\n` 计数、连续换行归一化、400 兜底；测试 29/29 + G1 40/40 无回归
+- **⚠️ T045 待实测验证（初尘睡醒后继续）**：长回复 3 段切分，Operit 完整但 QQ 只收到前半段；已修复 requestJson 业务码误判（HTTP200+code≠0）+ 新增 `sendResult.segmentResults` 每段真实返回记录。**验证方法**：发一条长回复消息（如"讲个长故事"），查桥 status `lastProcessedItems[].sendResult.segmentResults` 的每段 code/message，判断后段是否被平台拒绝及原因
 - **✅ 群链路全闭环（08-08 03:12 实测）**：@消息（mentions 透传识别）→ 5s 聚合 → AI 完整回复（G7 识别"初尘"）→ 回传 QQ 成功
 - **增强版 Gateway**：running + connected（botUsername 渡渡，AppID 1904028946，端口 32146）
 - **自动回复桥**：running，idle 3s 轮询；C2C 绑定初尘（604898bd）、proactive 目标 CC9F59…、群聚合 5s、keyword_or_at + 关键词[渡渡,dodo,渡渡渡渡]、群成员绑定初尘（G7）、waifu 单聊3/群5
 - **⚠️ 烧录 SOP（T044）**：每次 debug_install_toolpkg 后验证桥 `runtime.running`，必要时重新 `qqbot_pro_bridge_start`
-- **近期修复**：T037-T044 全记录于 TROUBLESHOOTING；T043 后 Gateway 每次启动强制重解资源
-- **下一步**：G2 上下文三态收尾（off 已落地，automatic/agent_on_demand 待补）→ G3 replyTo → G7 完整版（UI 管理）→ G5 Hook → G6 UI
+- **近期修复**：T037-T045 全记录于 TROUBLESHOOTING；T043 后 Gateway 每次启动强制重解资源
+- **下一步**：T045 实测闭环 → G2 上下文三态收尾（off 已落地，automatic/agent_on_demand 待补）→ G3 replyTo → G7 完整版（UI 管理）→ G5 Hook → G6 UI
 - **提醒**：原包 Gateway 与 qqbot_auto_reply 必须保持禁用；语气问题初尘排查中
 
 ---
