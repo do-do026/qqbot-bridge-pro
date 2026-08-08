@@ -1323,6 +1323,8 @@ async function processSingleEventAsync(config, event) {
     let streamedChunkCount = 0;
     let lastSendResult = null;
     let streamSendQueue = Promise.resolve();
+    // T045 调试：记录每条分段的发送响应（含业务 code/message），定位静默丢失段
+    const segmentSendResults = [];
     // G4：统一 Waifu chunker（与群聊完整文本分段共用同一状态机；`。！？\n` 计数、连续换行归一化、400 字符兜底）
     const chunker = new waifuChunker.WaifuChunker({
         flushSentences,
@@ -1333,7 +1335,16 @@ async function processSingleEventAsync(config, event) {
         nextMsgSeq += 1;
         streamedChunkCount += 1;
         streamSendQueue = streamSendQueue.then(async () => {
-            lastSendResult = await sendReplyToQQAsync(eventRef, text, currentMsgSeq);
+            const segmentResult = await sendReplyToQQAsync(eventRef, text, currentMsgSeq);
+            segmentSendResults.push({
+                msgSeq: currentMsgSeq,
+                scene: (0, core.asText)(segmentResult.scene),
+                code: segmentResult.response ? segmentResult.response.code : null,
+                message: (0, core.asText)(segmentResult.response && segmentResult.response.message),
+                ok: Boolean(segmentResult.response && (segmentResult.response.id || segmentResult.response.msg_id)),
+                responseId: (0, core.asText)(segmentResult.response && segmentResult.response.id)
+            });
+            lastSendResult = segmentResult;
         });
     };
     const generated = await generateAiReplyAsync(config, event, eventKey, shouldStreamReplyToQQ
@@ -1367,6 +1378,10 @@ async function processSingleEventAsync(config, event) {
             chunkCount: streamedChunkCount
         })
         : await sendReplyToQQAsync(event, aiResponse.trim(), nextMsgSeq);
+    if (shouldStreamReplyToQQ && segmentSendResults.length > 0) {
+        // T045 调试：暴露每条分段的发送结果（含业务 code），便于定位静默丢失段
+        sendResult.segmentResults = segmentSendResults;
+    }
     const records = await readAutoReplyRecordsAsync();
     records[eventKey] = {
         status: "replied",
