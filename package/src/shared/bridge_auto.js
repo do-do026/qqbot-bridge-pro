@@ -2,6 +2,7 @@ const core = require("./core.js");
 const state = require("./bridge_state.js");
 const bridgeConfig = require("./bridge_config.js");
 const gateway = require("../packages/qqbot_pro_gateway.js");
+const waifuChunker = require("./waifu_chunker.js"); // G4：统一 Waifu chunker（单聊流式 + 群聊完整文本共用）
 "use strict";
 module.exports = {
     ensureQQBotAutoReplyLoopStarted,
@@ -1049,21 +1050,8 @@ function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregated
     return `<attachment id="${escapeXml(attachmentId)}" filename="qq_group_aggregate_context.txt" type="text/plain" size="${content.length}">${escapeXml(content)}</attachment>`;
 }
 function splitReplyBySentenceCount(text, sentenceCount, maxLength = 400) {
-    const result = [];
-    let buffer = "";
-    let count = 0;
-    const limit = Math.max(Number(sentenceCount) || 1, 1);
-    for (const ch of (0, core.asText)(text)) {
-        buffer += ch;
-        if (/[。！？]/.test(ch)) count += 1;
-        if (count >= limit || buffer.length >= maxLength) {
-            if (buffer.trim()) result.push(buffer.trim());
-            buffer = "";
-            count = 0;
-        }
-    }
-    if (buffer.trim()) result.push(buffer.trim());
-    return result;
+    // G4：统一 Waifu chunker 批处理（`。！？\n` 计数、连续换行归一化、400 字符兜底）
+    return waifuChunker.splitText(text, sentenceCount, maxLength);
 }
 async function sendReplyChunksToQQAsync(event, text, sentenceCount) {
     const chunks = splitReplyBySentenceCount(text, sentenceCount);
@@ -1335,16 +1323,12 @@ async function processSingleEventAsync(config, event) {
     let streamedChunkCount = 0;
     let lastSendResult = null;
     let streamSendQueue = Promise.resolve();
-    let pendingBuffer = "";
-    let pendingSentenceCount = 0;
-    const SENTENCE_END_REGEX = /[。！？]/g;
-    const flushPendingBuffer = (eventRef, isFinal) => {
-        const text = pendingBuffer.trim();
-        pendingBuffer = "";
-        pendingSentenceCount = 0;
-        if (!text) {
-            return;
-        }
+    // G4：统一 Waifu chunker（与群聊完整文本分段共用同一状态机；`。！？\n` 计数、连续换行归一化、400 字符兜底）
+    const chunker = new waifuChunker.WaifuChunker({
+        flushSentences,
+        maxLength: MAX_BUFFER_LENGTH
+    });
+    const enqueueSegment = (eventRef, text) => {
         const currentMsgSeq = nextMsgSeq;
         nextMsgSeq += 1;
         streamedChunkCount += 1;
@@ -1361,18 +1345,17 @@ async function processSingleEventAsync(config, event) {
             if (!chunkText) {
                 return;
             }
-            pendingBuffer += chunkText;
-            const matches = chunkText.match(SENTENCE_END_REGEX);
-            if (matches) {
-                pendingSentenceCount += matches.length;
-            }
-            if (pendingSentenceCount >= flushSentences || pendingBuffer.length >= MAX_BUFFER_LENGTH) {
-                flushPendingBuffer(event, false);
+            const segments = chunker.push(chunkText);
+            for (let segIndex = 0; segIndex < segments.length; segIndex += 1) {
+                enqueueSegment(event, segments[segIndex]);
             }
         }
         : undefined);
-    if (shouldStreamReplyToQQ && pendingBuffer.trim()) {
-        flushPendingBuffer(event, true);
+    if (shouldStreamReplyToQQ) {
+        const remaining = chunker.finish();
+        for (let segIndex = 0; segIndex < remaining.length; segIndex += 1) {
+            enqueueSegment(event, remaining[segIndex]);
+        }
     }
     await streamSendQueue;
     const aiResponse = typeof generated.aiResponse === "string" ? generated.aiResponse : "";
