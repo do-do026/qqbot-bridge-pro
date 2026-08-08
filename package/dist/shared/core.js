@@ -142,12 +142,19 @@ async function requestJson(url, method, headers, body, timeoutMs) {
             if (isObject(parsed)) json = parsed;
         }
     } catch (_) {}
+    // 业务码校验：QQ 开放平台部分失败响应为 HTTP 200 + 业务错误码（{"code":非0,"message":...}）。
+    // 只按 HTTP 状态判成功会把“已送达但被平台拒绝”误判为成功（T045 根因：流式多段回复后半段静默丢失）。
+    const rawCode = json && json.code != null ? json.code : (json && json.retcode != null ? json.retcode : NaN);
+    const code = Number(rawCode);
+    const businessError = Number.isFinite(code) && code !== 0;
     return {
-        success: statusCode >= 200 && statusCode < 300,
+        success: statusCode >= 200 && statusCode < 300 && !businessError,
         statusCode,
         contentType: asText(response && response.contentType),
         body: content,
-        json
+        json,
+        code: Number.isFinite(code) ? code : null,
+        message: asText(json && (json.message || json.msg || json.error))
     };
 }
 async function fetchAccessToken(snapshot, timeoutMs) {
