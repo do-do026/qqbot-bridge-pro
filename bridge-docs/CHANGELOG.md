@@ -2,12 +2,12 @@
 
 ## 2026-08-10
 
-### 🎉 链路全闭环 + Epic G2 automatic 完成（02:30-02:57）
+### 🎉 链路全闭环 + Epic G2 automatic 完成（02:30-03:14）
 - **C2C 私聊链路闭环实测（02:41）**：俄耳甫斯故事长文切 8 段**全部 ok:true 送达**（segmentResults 完整记录）——T045 修复后发送可靠性闭环
 - **T046 卡死自愈生效**：02:29 自动循环在 Gateway 重连窗口宿主调用挂起（表现为"循环死了但 running=true"）；修复：tick watchdog（5 分钟强制重置+代际锁）+ sendMessageStreaming Promise.race 硬超时；已烧录
-- **Epic G2 automatic 模式完成**：`buildGroupNeighborContextAttachment`（锚点前后各 groupContextBefore/After、最多 groupContextLimit、复用 G7 标签）；flush 时 mode=automatic 自动附加邻近上下文附件（`GROUP_NEIGHBOR_CONTEXT`），不额外落盘
+- **Epic G2 automatic 模式完成并实测闭环（03:14 初尘确认）**：`buildGroupNeighborContextAttachment`（锚点前后各 groupContextBefore/After、最多 groupContextLimit、复用 G7 标签）；flush 时 mode=automatic 自动附加邻近上下文附件（`GROUP_NEIGHBOR_CONTEXT`），不额外落盘
+- **实测记录**：03:10 初尘反馈"只获取了艾特消息"→ 排查确认普通消息已进缓存桶（qqbot_pro_group_context 查得 5 条、member 显示 [初尘]），根因是 mode 仍为 off → 切 automatic 后 03:14 复测 **AI 成功看到邻近上下文** ✅；初尘认可"作为附件进来挺好的"（token 按次消耗、不落盘、缓存有容量上限不无限膨胀）
 - **测试**：G1 冒烟 **49/49**（新增 9 项 G2 automatic 用例）+ G4 29/29；已烧录、桥已重启
-- **待初尘实测（明天）**：群内先发几条普通消息，再 @渡渡 → AI 应能看到自动附带的邻近上下文（含 [初尘] 标签）；测完把 `group_context_mode` 切回 off 或保留按需
 - 文档：CHANGELOG/HANDOFF 更新；GitHub 推送
 
 ## 2026-08-09
