@@ -236,9 +236,9 @@ QQ 官方提供 C2C `stream_messages`，Operit 也具备 HTTP 实现条件。但
 6. **上下文缓存与聚合桶持久化**（auto_reply_state.json 扩展）；恢复只恢复 `groupCacheRecoveryMaxAgeMs`（默认 24h）内条目，过期直接丢弃（2026-08-07 初尘确认"关一两天再开该丢就丢"）。
 7. **到期群并发 flush**：使用 `groupFlushConcurrency`（默认 3，clamp 1～8）；按 chatId 串行、跨 chat 有限并发，不能只做粗暴 Promise.all。
 
-#### Epic G2：上下文查询
+#### Epic G2：上下文查询 ✅ 已完成（2026-08-10 实测闭环）
 
-1. off/automatic/agent_on_demand 三态。
+1. ~~off/automatic/agent_on_demand 三态。~~ ✅ 全实现（automatic 自动附带邻近上下文附件，复用 G7 标签；agent_on_demand 走 `qqbot_pro_group_context` 查询工具）。
 2. 前 5、后 5、最大 20。
 3. @ 事件与上下文消息编号隔离。
 4. Agent 查询工具必须按 group、anchor event、before/after/limit 请求，不能一次泄露全部群缓存。
