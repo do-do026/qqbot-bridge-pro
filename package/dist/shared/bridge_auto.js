@@ -25,6 +25,7 @@ module.exports = {
         extractAtTargetIds,
         resolveMemberLabel,
         buildEventKey,
+        buildGroupNeighborContextAttachment,
         serializeCachedEvent,
         restoreGroupRuntimeStateAsync,
         persistGroupRuntimeStateAsync,
@@ -47,6 +48,13 @@ const DEFAULT_ASSISTANT_INSTRUCTION = "";
 const MAX_EVENT_PROCESS_FAIL_COUNT = 3;
 let autoReplyTimerId = null;
 let autoReplyTickActive = false;
+// T046（2026-08-10）：tick 卡死 watchdog。宿主调用（sendMessageStreaming 等）的 timeout_ms 万一不生效，
+// tick 会永久挂起（autoReplyTickActive 卡 true，后续 tick 全部跳过，表现为"循环死了但 running=true"）。
+// 超过 TICK_STUCK_MS 判定卡死：强制重置 active 并作废旧代际，让循环自动恢复；
+// 重复处理风险由 records chat_done 去重兜底（同 eventKey 已 chat_done 直接复用缓存）。
+const TICK_STUCK_MS = 300000; // 5 分钟
+let lastTickStartedAt = 0;
+let tickGeneration = 0;
 const groupPendingBuckets = new Map();
 const groupContextCache = new Map(); // Epic G1：群上下文环形缓存 key=groupOpenId → { events: [], lastAt }
 const groupCacheStateDirty = { dirty: false }; // 内存缓存有变更但未落盘
@@ -856,7 +864,9 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
     let sendResult = null;
     for (let attempt = 1; attempt <= maxEmptyRetries; attempt += 1) {
         try {
-            sendResult = await Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
+            // T046：宿主 timeout_ms 万一不生效时，JS 侧 Promise.race 兜底强制超时，
+            // 防止 tick 永久挂起（旧 promise 若后续 resolve，onIntermediateResult 仍会发流式段，但主流程已超时放弃）
+            const streamPromise = Tools.Chat.sendMessageStreaming(userMessage, chatId, config.characterCardId || undefined, undefined, {
                 waifu: (0, core.hasOwn)(options, "waifu") ? options.waifu : config.waifu,
                 persist_turn: true,
                 notify_reply: false,
@@ -865,6 +875,13 @@ async function generateAiReplyAsync(config, event, eventKey, onIntermediateResul
                 timeout_ms: aiTimeoutMs,
                 onIntermediateResult
             });
+            const hardTimeoutMs = Math.max(Number(aiTimeoutMs) || 180000, 1000) + 30000;
+            const hardTimeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error(isGroupScene
+                    ? "group_ai_timeout: sendMessageStreaming hung beyond hard timeout"
+                    : "AI streaming hung beyond hard timeout")), hardTimeoutMs);
+            });
+            sendResult = await Promise.race([streamPromise, hardTimeoutPromise]);
         }
         catch (error) {
             const errorText = (0, core.safeErrorMessage)(error);
@@ -1089,7 +1106,14 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
         userOpenId: "",
         authorId: ""
     };
-    const userMessage = [staleMark + aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
+    let userMessage = [staleMark + aggregateText, buildGroupAggregateContextAttachment(config, aggregateEvent, events.length)].join(" ");
+    // Epic G2 automatic：自动附带邻近上下文（锚点=本批最后一条事件，前后各 groupContextBefore/After，最多 groupContextLimit）
+    if ((0, core.asText)(config.groupContextMode).trim() === "automatic") {
+        const neighborContext = buildGroupNeighborContextAttachment(config, groupOpenId, buildEventKey(lastEvent));
+        if (neighborContext) {
+            userMessage += " " + neighborContext;
+        }
+    }
     // 群聚合场景（Epic G0）：AI 生成超时用 groupAiTimeoutMs、单次尝试；超时抛 group_ai_timeout。
     // waifu:false —— 群聚合有自己的群聊 5 句切分（sendReplyChunksToQQAsync），
     // 且 waifu 流式需要 onIntermediateResult 收集器，群聚合未传收集器会导致 aiResponse 为空（T041）。
@@ -1630,9 +1654,21 @@ async function recordAutoReplyTickErrorAsync(errorText) {
 }
 async function tickAutoReplyLoopAsync(source) {
     if (autoReplyTickActive) {
-        return;
+        // T046：检测上一 tick 是否卡死（宿主调用 timeout 未生效等），卡死则强制恢复循环
+        const stuckMs = lastTickStartedAt > 0 ? Date.now() - lastTickStartedAt : 0;
+        if (stuckMs > TICK_STUCK_MS) {
+            const message = `tick_stuck: previous tick hung ${Math.round(stuckMs / 1000)}s, forcibly reset`;
+            console.warn(`[qqbot_auto_reply] ${message}`);
+            tickGeneration += 1; // 作废旧 tick 代际：其 finally 不再清 active，避免与新 tick 并发
+            autoReplyTickActive = false;
+            await recordAutoReplyTickErrorAsync(message);
+        } else {
+            return;
+        }
     }
     autoReplyTickActive = true;
+    const myGeneration = tickGeneration;
+    lastTickStartedAt = Date.now();
     try {
         await processAutoReplyQueueOnceAsync(source);
     }
@@ -1649,7 +1685,9 @@ async function tickAutoReplyLoopAsync(source) {
         catch (error) {
             console.warn(`[qqbot_auto_reply] persist after tick failed: ${(0, core.safeErrorMessage)(error)}`);
         }
-        autoReplyTickActive = false;
+        if (tickGeneration === myGeneration) {
+            autoReplyTickActive = false;
+        }
     }
 }
 async function ensureQQBotAutoReplyLoopStarted(source = "manual_start") {
@@ -1973,6 +2011,61 @@ async function qqbot_pro_bridge_list_image_folders() {
  * 默认以最后一条缓存消息为 anchor，取前后各 groupContextBefore/After 条（默认各5），
  * 单次最多 groupContextLimit（默认20）；查询结果只发给模型、不落 Operit 对话（落盘边界见蓝图 §12.1）。
  */
+/**
+ * Epic G2 automatic：自动附带邻近上下文（群聚合时从持久化上下文缓存取锚点前后文，附加到用户消息）。
+ * 数据源与 qqbot_pro_group_context 相同（groupContextCache），复用 G7 成员标签；
+ * 只发给模型（随聚合 userMessage），不额外落盘；无缓存/无锚点 → 返回 null。
+ */
+function buildGroupNeighborContextAttachment(config, groupOpenId, anchorEventKey) {
+    const gid = (0, core.asText)(groupOpenId).trim();
+    if (!gid) {
+        return null;
+    }
+    const entry = groupContextCache.get(gid);
+    if (!entry || entry.events.length === 0) {
+        return null;
+    }
+    const events = entry.events;
+    let anchorIndex = events.length - 1;
+    const anchorKey = (0, core.asText)(anchorEventKey).trim();
+    if (anchorKey) {
+        for (let index = 0; index < events.length; index += 1) {
+            if (buildEventKey(events[index]) === anchorKey) {
+                anchorIndex = index;
+                break;
+            }
+        }
+    }
+    const limit = Math.min(Math.max(Number(config.groupContextLimit) || 20, 0), 20);
+    const defaultBefore = Math.min(Math.max(Number(config.groupContextBefore) || 5, 0), limit);
+    const defaultAfter = Math.min(Math.max(Number(config.groupContextAfter) || 5, 0), limit);
+    const start = Math.max(0, anchorIndex - defaultBefore);
+    const end = Math.min(events.length - 1, anchorIndex + defaultAfter);
+    let selected = events.slice(start, end + 1);
+    if (selected.length > limit) {
+        selected = selected.slice(-limit);
+    }
+    if (selected.length === 0) {
+        return null;
+    }
+    const lines = [
+        `groupOpenId: ${gid}`,
+        `anchorIndex: ${anchorIndex}`,
+        `totalCached: ${events.length}`,
+        "",
+        "instruction: 以下为本批消息的邻近群聊上下文（自动附带，automatic 模式）。请参考发言风格与话题，但只回应最新触发的消息，不要重复回答旧内容。"
+    ];
+    for (let index = 0; index < selected.length; index += 1) {
+        const ev = selected[index];
+        const label = resolveMemberLabel(config, (0, core.firstNonBlank)((0, core.asText)(ev.userOpenId).trim(), (0, core.asText)(ev.authorId).trim()), gid);
+        const content = (0, core.asText)(ev.content).trim();
+        const isAt = isGroupAtEventType((0, core.asText)(ev.eventType));
+        lines.push(`${index + 1}. [${label}]${isAt ? " (@)" : ""} ${content}`);
+    }
+    const body = lines.join("\n");
+    return `<attachment id="GROUP_NEIGHBOR_CONTEXT:${gid}" filename="qq_group_neighbor_context.txt" type="text/plain" size="${body.length}">${escapeXml(body)}</attachment>`;
+}
+
 async function qqbot_pro_group_context(params = {}) {
     const groupOpenId = (0, core.asText)(params.group_openid).trim();
     if (!groupOpenId) {
