@@ -177,6 +177,39 @@ function makeEvent(overrides) {
     const noCache = await bridgeAuto.qqbot_pro_group_context({ group_openid: "groupZZZ" });
     assert(noCache.note === "no_cached_context", "无缓存群返回 no_cached_context");
 
+    // 7) Epic G2 automatic：邻近上下文附件（自动附带模式）
+    bridgeAuto._internal.clearGroupRuntimeState();
+    const g2Config = {
+        ...cfg,
+        groupContextMode: "automatic",
+        groupContextBefore: 5,
+        groupContextAfter: 5,
+        groupContextLimit: 20,
+        groupMemberBindings: [{ memberOpenid: "CC9F593975D8C8F1E1EC72DD91305C63", groupOpenid: "", title: "初尘" }]
+    };
+    for (let i = 0; i < 8; i += 1) {
+        bridgeAuto._internal.pushToGroupContextCache(g2Config, makeEvent({
+            groupOpenId: "groupA",
+            content: `ctx${i}`,
+            eventId: `a${i}`,
+            messageId: `a${i}`,
+            userOpenId: i === 6 ? "CC9F593975D8C8F1E1EC72DD91305C63" : `OTHER_${i}`
+        }));
+    }
+    const lastEvt = { eventId: "a7", messageId: "a7", groupOpenId: "groupA", scene: "group", timestamp: String(Date.now()), userOpenId: "OTHER_7" };
+    const neighborAttach = bridgeAuto._internal.buildGroupNeighborContextAttachment(g2Config, "groupA", bridgeAuto._internal.buildEventKey(lastEvt));
+    assert(neighborAttach && neighborAttach.startsWith("<attachment"), "automatic 有缓存 → 返回上下文附件");
+    assert(neighborAttach.includes("GROUP_NEIGHBOR_CONTEXT:groupA"), "附件 id 含群标识");
+    assert(neighborAttach.includes("[初尘]"), "G7 绑定标签生效（[初尘]）");
+    assert(neighborAttach.includes("[QQ"), "未绑定成员显示 QQ+后四位");
+    assert(neighborAttach.includes("ctx2"), "包含上下文最早一条（before=5 范围内）");
+    assert(!neighborAttach.includes("ctx0"), "before=5 范围外的不包含");
+    assert(neighborAttach.includes("ctx7"), "包含锚点消息");
+    const noneAttach = bridgeAuto._internal.buildGroupNeighborContextAttachment(g2Config, "groupZZZ", "");
+    assert(noneAttach === null, "无缓存群 → null（不附加）");
+    const offAttach = bridgeAuto._internal.buildGroupNeighborContextAttachment({ ...g2Config, groupContextMode: "off" }, "groupA", bridgeAuto._internal.buildEventKey(lastEvt));
+    assert(offAttach !== null, "函数本身与模式无关（off 由调用方控制，此处仅验证数据可读）");
+
     console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
     process.exit(failed > 0 ? 1 : 0);
 })().catch((error) => {
