@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro: G4 unified waifu chunker (shared state machine, newline counting, 400 fallback) + tests 2026-08-09"
+COMMIT_MSG = "qqbot-pro: G2 automatic context mode + T046 tick watchdog + C2C chain closed-loop verified 2026-08-10"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
