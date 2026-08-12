@@ -2,6 +2,19 @@
 
 ## 2026-08-12
 
+### 🎯 Epic G3 replyTo 代码完成（20:31-21:0x）
+- **稳定批次键**：`GROUP_AGGREGATE:{groupOpenId}:{Date.now()}` → `hash(sorted(eventKeys))`（排序后哈希），同批事件重试幂等。
+- **聚合编号**：聚合文本每条触发消息标 `[#N][标签] 内容`，N 对应 events[N-1]。
+- **AI 协议头**：`{replyTo, content, fallbackPreference}`，容错解析（```json包裹/前缀文字/content缺省回退正文），replyTo 无效降级最后一条，fallback 非法默认 drop。
+- **精确锚点被动回复**：按 replyTo 选中事件的 replyHint.msg_id 回复，多段共用锚点 msg_seq 递增。
+- **active_send 降级**：锚点过期时按 AI 选择主动群消息点名发送（`sendProactiveGroupMessageAsync`，无 msg_id；平台是否接受待实机验证）。
+- **幂等防重**：发送成功后 records[aggregateEventKey].sent=true，同批事件再次 flush 走 alreadySent 跳过。
+- **测试**：`scripts/test_g3_replyto.js` 20/20 通过；G1 49/49、G4 29/29 无回归。
+- **状态**：代码完成 + 同步 dev_package，**待烧录 + 真机验证**（STATUS §4 任务 8/9）。
+- 相关文档：STATUS §3/§4、ARCHITECTURE §7 已更新。
+
+## 2026-08-12（早段）
+
 ### 📄 根目录文档体系重建（19:04-20:14）
 - **背景**：新窗口 AI 冷启动核对时发现根目录 `README.md` / `ARCHITECTURE.md` / `STATUS.md` 严重滞后（仍写「原包承担桥接」「官方流式待做」「target_chat_id 群固定目标」等已被推翻的口径），与 `bridge-docs` 和真实代码不一致。
 - **重建**：
