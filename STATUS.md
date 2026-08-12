@@ -61,7 +61,7 @@
 | G4 统一 chunker | `。！？\n`、换行归一化、400 兜底、共用状态机 | ✅ 完成（29/29） |
 | G2 上下文三态 | off/automatic/agent_on_demand + 查询工具 | ✅ 完成（automatic 实测闭环） |
 | G7 最小版 | 群成员 openid → 显示名 | ✅ 完成 |
-| **G3 replyTo** | 编号回复、稳定批次键、引用锚点、过期降级 | 🔴 **当前入口，未开始主体** |
+| **G3 replyTo** | 编号回复、稳定批次键、引用锚点、过期降级 | 🔧 **代码完成**（2026-08-12 20:xx，20/20 测试通过），**待烧录 + 真机验证** |
 | G7 完整版 | UI 管理群成员绑定 | ⬜ 待做 |
 | G5 Hook 探针 | 非落盘桥接 Prompt 验证 | ⬜ 待做 |
 | 可靠性 Sprint | 事务幂等、token 缓存、错误码/Trace ID | ⬜ 待做 |
@@ -71,15 +71,15 @@
 
 按 ARCHITECTURE §7 契约执行：
 
-1. 稳定批次键：`GROUP_AGGREGATE:{groupOpenId}:{Date.now()}` → `hash(sorted(eventKeys))`。
-2. 聚合文本为每条触发消息编号 `[#N][标签][时间]`，维护 index → 事件映射。
-3. 定义 AI 结构化回复协议 `{replyTo, content, fallbackPreference}`，含容错解析与纯文本降级。
-4. 按 `replyTo` 选中消息的 msg_id 被动回复，可选携带 `message_reference`。
-5. 实现 `fallbackPreference=active_send` 的主动群消息降级（文本点名，尽力而为）。
-6. 保留/强化锚点过期丢弃路径（现有 4 分钟安全阀），完善原因记录。
-7. 补充测试：编号映射、协议解析、失效降级、时效决策树。
-8. 真机验证：群里连续 @ 两条以上，确认 AI 可选中间某条回复并带引用。
-9. 完成后更新本文件、ARCHITECTURE §7 状态与 HANDOFF。
+1. ~~稳定批次键~~ ✅ 2026-08-12 已实现：`hash(sorted(eventKeys))`
+2. ~~聚合编号 `[#N]` + index 映射~~ ✅ 2026-08-12 已实现
+3. ~~AI 结构化回复协议 `{replyTo, content, fallbackPreference}` 解析~~ ✅ 2026-08-12 已实现（含容错）
+4. ~~按 replyTo 锚点被动回复~~ ✅ 2026-08-12 已实现（多段共用锚点，msg_seq 递增）
+5. ~~active_send 主动群消息降级~~ ✅ 2026-08-12 已实现（文本点名，平台是否接受待实机验证）
+6. ~~锚点过期丢弃路径 + 原因记录~~ ✅ 2026-08-12 已保留强化（drop 默认）
+7. ~~补充测试~~ ✅ 2026-08-12：20/20 通过（协议解析/编号/稳定键）+ G1 49/49 + G4 29/29 无回归
+8. **真机验证**：群里连续 @ 两条以上，确认 AI 可选中间某条回复并带引用
+9. **烧录 + 部署**：`debug_install_toolpkg` → 启用三个子包 → `qqbot_pro_bridge_start`（T044）
 
 ## 5. 已知问题与文档状态
 
