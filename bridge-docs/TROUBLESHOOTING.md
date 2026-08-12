@@ -353,3 +353,32 @@ await ToolPkg.readResource(RESOURCE_KEY, `${STATE_DIR}/${SERVICE_FILE}`);
 **关联**：T038（烧录重置子包状态）、T043（烧录后需要重启 Gateway/桥的完整 SOP）。
 
 **验证**：.toolpkg 导入后重启 Operit，侧边栏/工具箱是否出现"QQ Bot Bridge Pro"入口。
+
+---
+
+### T046：桥轮询循环卡死（"循环死了但 running=true"），tick watchdog + JS 硬超时
+
+**现象**（2026-08-10 02:30 初尘实测）：QQ 消息已进 Operit、AI 已生成回复，但发不回 QQ；`qqbot_pro_bridge_status` 显示 `running:true` 但 `lastPollAt` 停在上次 tick，不再更新；`lastError` 为空，事件积压在 Gateway 队列。手动 `run_once` 能成功发送（segmentResults 全 ok），说明发送链路本身没问题。
+
+**根因**：桥的 tick 循环在某次宿主调用（`Tools.Chat.sendMessageStreaming`）上永久挂起——`autoReplyTickActive` 卡在 true，后续所有 tick 直接 return 跳过，但 runtime 状态仍显示 running。宿主给的 `timeout_ms` 未生效。
+
+**修复**（双保险）：
+1. tick 层 watchdog：上次 tick 启动超过 5 分钟未结束 → 强制重置 active + 作废旧代际（旧 tick 恢复也不会并发），重复处理由 records `chat_done` 去重兜底。
+2. `sendMessageStreaming` 外再包 `Promise.race` 硬超时（`aiTimeoutMs + 30s`），宿主 timeout 万一不生效也能强制超时。
+
+**验证**：修复烧录后，再触发卡死 5 分钟内自动复活；08-10 长文 8 段全送达确认无回归。
+
+---
+
+### T047：单次 create_file 参数过长被中转层截断，文件未落盘（长文档必须分片写）
+
+**现象**（2026-08-12）：重建根目录文档时，连续多次尝试用单个 `create_file` 写入 8-15KB 的 `ARCHITECTURE.md` / `STATUS.md`，均表现为：工具调用被渲染成普通文本或返回「失败」，文件实际不存在；前序会话（GPT 中转站）反复重试同一超长写入，每次都失败，且回复里出现重复的"我开始写文档"文案。`工具结果过长，已截断` 与 `User cancelled`（宿主取消并行调用）也会干扰判断。
+
+**根因**：单次工具调用参数太长，中转/宿主层在调用完成前截断；`create_file` 未执行或未落盘，但 AI 可能误以为成功。与代码无关，是写入策略问题。
+
+**修复/规避**（分片写入 SOP）：
+1. `create_file` 只创建小骨架（标题 + `<!-- APPEND_HERE -->` 尾标记）。
+2. 每次 `edit_file` 把 `<!-- APPEND_HERE -->` 替换为「新章节 + `<!-- APPEND_HERE -->`」，单片控制在 1-2KB。
+3. 全部章节写完，最后一步把尾标记替换为收尾文案。
+4. 每片都实时落盘，可从任意断点续写；完成后用终端校验（行数、标题结构、grep 无残留标记）。
+5. 并行工具调用易被宿主取消，敏感长操作尽量串行。
