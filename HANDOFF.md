@@ -1,12 +1,34 @@
 # qqbot-pro 冷启动接续文档（HANDOFF）
 
 > 用途：新窗口 AI 接续本工程的唯一入口。读完本文件 + 三个链接，即可独立工作，无需初尘转述。
-> 更新时间：2026-08-08 01:25
-> 状态：v0.3.0（合并 qqbot-bridge-pro v1.0.0 完整桥接能力），已重新打包安装，Gateway 资源解出 bug（T037）已修复并全链路恢复运行
+> 更新时间：2026-08-12 20:14
+> 状态：v0.3.0（合并 qqbot-bridge-pro v1.0.0 完整桥接能力）；G0/G1/G2/G4/G7最小版已完成，**当前主线 G3 replyTo**；根目录 README/ARCHITECTURE/STATUS 已于 2026-08-12 重建（旧版有 .backup_20260812_1913 备份）
 
 ---
 
-## 0.5. 当前运行状态（2026-08-10 02:5x 快照）
+## 0.5. 当前运行状态（2026-08-12 20:14 快照 · 最新，旧快照保留于下方）
+
+### 2026-08-12 文档体系重建（本窗口完成）
+
+- 根目录三份文档被确认严重过时（仍写「原包承担桥接」「官方流式待做」等被推翻口径），已整体重建：
+  - `README.md`（79行）：用户效果、运行原则、平台限制。
+  - `ARCHITECTURE.md`（249行）：系统架构 + **G3 接口契约（§7，编号 replyTo / 稳定批次键 / 时效决策树）**。
+  - `STATUS.md`（108行）：能力验收矩阵、当前运行状态、**G3 任务清单（§4）**。
+- 旧版备份：`README.md.backup_20260812_1913` / `ARCHITECTURE.md.backup_20260812_1913` / `STATUS.md.backup_20260812_1913`，可回退。
+- 源码、bridge-docs 本轮未改；Gateway 与桥未动，保持运行。
+- **当前主线：G3 replyTo**（任务清单见 STATUS §4，接口契约见 ARCHITECTURE §7）。按序其后：G7 完整版 → G5 Hook 探针 → 可靠性 Sprint → G6 UI。
+- 排障 T047：长文档必须分片写入（`create_file` 骨架 + `edit_file` 替换 `<!-- APPEND_HERE -->` 尾标记逐片追加），单次超长参数会被中转层截断导致文件未落盘。
+
+### 运行状态（实测）
+
+- **增强版 Gateway**：running + connected（bot「渡渡」，AppID 1904028946，端口 32146）
+- **自动回复桥**：running，idle 3s 轮询（startSource: application_on_create，Operit 重启会自动拉起）
+- **群聚合**：5s 窗口（生产值），keyword_or_at + 关键词[渡渡, dodo, 渡渡渡渡]
+- **上下文模式**：automatic（前/后各5，单次最多20）
+- **C2C 绑定**：初尘 → 指定对话（c2cFixedBindings）；**主动目标**：初尘；**成员绑定**：初尘 → 「初尘」
+- **Waifu**：私聊3 / 群5，`。！？\n` 计数；**待处理队列**：0
+
+### 2026-08-10 02:5x 快照（历史）
 
 - **✅ C2C 私聊链路全闭环（08-10 02:41 实测）**：长文 8 段全部 ok:true 送达；T045（业务码校验+segmentResults）+ T046（tick watchdog + 硬超时）已烧录生效
 - **✅ Epic G2 automatic 完成并实测闭环（08-10 03:14 初尘确认）**：群聚合自动附带邻近上下文附件（前/后各 groupContextBefore/After，最多 limit，复用 G7 标签）；实测确认 AI 能读到普通消息上下文；模式当前 automatic（初尘可随时切回 off 省 token）
