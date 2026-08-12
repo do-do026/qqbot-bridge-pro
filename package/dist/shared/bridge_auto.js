@@ -37,7 +37,12 @@ module.exports = {
         get groupPendingBuckets() {
             return groupPendingBuckets;
         },
-        readAutoReplyConfigAsync
+        readAutoReplyConfigAsync,
+        // G3 replyTo（2026-08-12）：协议解析 / 稳定批次键 / 编号聚合 / 主动群消息
+        parseGroupReplyDirective,
+        buildStableAggregateKey,
+        buildGroupAggregateMessageAsync,
+        sendProactiveGroupMessageAsync
     },
     onQQBotAutoReplyApplicationCreate,
     onQQBotAutoReplyApplicationForeground,
@@ -1040,9 +1045,90 @@ async function buildGroupAggregateMessageAsync(config, snapshot, events) {
         const content = (0, core.asText)(event.content).trim();
         const attachmentTags = await materializeQQInboundAttachmentsAsync(event);
         const suffix = attachmentTags.length > 0 ? ` ${attachmentTags.join(" ")}` : "";
-        lines.push(`[${label}] ${content}${suffix}`);
+        // G3：每条触发消息带局部编号 [#N]（1-based），与 events 数组下标一一对应（events[N-1]）。
+        // AI 可在回复协议头中用 replyTo 指向该编号，实现精确回复指定消息。
+        lines.push(`[#${index + 1}][${label}] ${content}${suffix}`);
     }
     return lines.join("\n");
+}
+// ===== G3 replyTo 协议（2026-08-12） =====
+// AI 可在回复开头输出 JSON 控制头（只被解析，不进入 QQ 消息）：
+//   {"replyTo": 2, "content": "回复正文", "fallbackPreference": "active_send" | "drop"}
+// replyTo：选中消息编号（1-based）；缺省/无效 → 回复最后一条。
+// fallbackPreference：原消息超过被动回复时效（4 分钟安全阀）时的降级方式：
+//   active_send → 主动群消息点名发送（尽力而为，平台是否接受需实机验证）
+//   drop（默认）→ 放弃发送并记录 anchor_expired
+function parseGroupReplyDirective(aiResponse) {
+    const directive = {
+        replyTo: null,
+        content: (0, core.asText)(aiResponse).trim(),
+        fallbackPreference: "drop"
+    };
+    const text = directive.content;
+    if (!text) {
+        return directive;
+    }
+    let jsonText = text;
+    // 容错：允许 ```json 代码块包裹（前后空白、首行/末行注释均可容忍）
+    const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenceMatch) {
+        jsonText = fenceMatch[1].trim();
+    }
+    const openIdx = jsonText.indexOf("{");
+    const closeIdx = jsonText.lastIndexOf("}");
+    if (openIdx < 0 || closeIdx <= openIdx) {
+        return directive;
+    }
+    let parsed = null;
+    try {
+        parsed = JSON.parse(jsonText.slice(openIdx, closeIdx + 1));
+    }
+    catch (_error) {
+        return directive;
+    }
+    if (!core.isObject(parsed)) {
+        return directive;
+    }
+    const replyTo = Number(parsed.replyTo);
+    directive.replyTo = Number.isInteger(replyTo) && replyTo > 0 ? replyTo : null;
+    const preference = (0, core.asText)(parsed.fallbackPreference).trim().toLowerCase();
+    directive.fallbackPreference = preference === "active_send" ? "active_send" : "drop";
+    const parsedContent = (0, core.asText)(parsed.content).trim();
+    if (parsedContent) {
+        directive.content = parsedContent;
+    }
+    else {
+        // content 字段缺省时，回退使用控制头之后剩余的正文（容错纯文本回复）
+        const afterJson = jsonText.slice(closeIdx + 1).trim();
+        directive.content = afterJson || directive.content;
+    }
+    return directive;
+}
+// G3：稳定批次键 = hash(sorted(eventKeys))，替代 GROUP_AGGREGATE:{groupOpenId}:{Date.now()}，
+// 保证同一批事件重试/重放时 key 稳定，配合 records 幂等避免重复回复。
+function buildStableAggregateKey(groupOpenId, eventKeys) {
+    const sorted = Array.isArray(eventKeys) ? eventKeys.slice().sort() : [];
+    const base = sorted.join("|");
+    return `GROUP_AGGREGATE:${(0, core.asText)(groupOpenId).trim()}:${hashText(base)}`;
+}
+// G3：主动群消息（无 msg_id 引用）。平台是否接受群主动消息需实机验证（见 ARCHITECTURE §7.5）。
+async function sendProactiveGroupMessageAsync(snapshot, groupOpenId, text, msgSeq = 1) {
+    const body = (0, core.buildSendBody)({
+        content: text,
+        msg_id: "",
+        event_id: "",
+        msg_seq: msgSeq
+    });
+    const response = await (0, core.openApiRequest)(snapshot, `/v2/groups/${encodeURIComponent(groupOpenId)}/messages`, "POST", body, 20000);
+    if (!response.success) {
+        throw new Error((0, core.firstNonBlank)((0, core.asText)(response.json.message), `HTTP ${response.statusCode}`));
+    }
+    return {
+        scene: "group",
+        groupOpenId,
+        proactive: true,
+        response: response.json
+    };
 }
 function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregatedCount) {
     const contentLines = [
@@ -1052,7 +1138,8 @@ function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregated
         `messageId: ${(0, core.asText)(aggregateEvent.messageId).trim()}`,
         `groupOpenId: ${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`,
         "",
-        "instruction: 这是群内多条消息聚合后的结果（已标注发言者）。请从中选择值得回应的内容回复，可点名回应某位群友，也可以整体回应；不要逐条回复，不要刷屏。"
+        "instruction: 这是群内多条消息聚合后的结果（每条已编号[#N]并标注发言者）。请从中选择值得回应的内容回复，可点名回应某位群友，也可以整体回应；不要逐条回复，不要刷屏。",
+        "replyToProtocol: 若要精确回复某条消息，请在回复开头输出 JSON 控制头（仅模型解析，不会发送给用户）：{\"replyTo\":消息编号,\"content\":\"回复正文\",\"fallbackPreference\":\"active_send\"}。replyTo 缺省回复最后一条；fallbackPreference 为 active_send（锚点过期时主动点名发送）或 drop（放弃，默认）。"
     ];
     const timestamp = (0, core.asText)(aggregateEvent.timestamp).trim();
     if (timestamp) {
@@ -1095,7 +1182,15 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
         ? `[stale: 本批消息最早发送于 ${Math.round((Date.now() - oldestBatchTs) / 1000 / 60)} 分钟前的历史消息，详见各条标柱的 sentAt]\n\n`
         : "";
     const lastEvent = events[events.length - 1];
-    const aggregateEventKey = `GROUP_AGGREGATE:${groupOpenId}:${Date.now()}`;
+    // G3：稳定批次键 = hash(sorted(eventKeys))，替代含 Date.now() 的旧键（幂等防重）
+    const rawEventKeys = [];
+    for (let index = 0; index < events.length; index += 1) {
+        const eventKey = buildEventKey(events[index]);
+        if (eventKey) {
+            rawEventKeys.push(eventKey);
+        }
+    }
+    const aggregateEventKey = buildStableAggregateKey(groupOpenId, rawEventKeys);
     const aggregateEvent = {
         ...lastEvent,
         content: aggregateText,
@@ -1125,58 +1220,53 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
         waifu: false
     });
     const aiResponse = (0, core.asText)(generated.aiResponse).trim();
-    // 锚点时效安全阀（Epic G0 提前量）：QQ 群被动回复约 5 分钟时效，预留 60s 安全边界。
-    // 窗口最后一条消息到达至今超过 4 分钟 → 不硬发过期被动回复，放弃并记录原因。
-    // （完整的 active_send 主动点名降级依赖 G3 replyTo 协议，届时启用。）
+    // ===== G3：解析 replyTo 协议并选择回复锚点 =====
+    const directive = parseGroupReplyDirective(aiResponse);
+    const replyContent = (0, core.asText)(directive.content).trim();
+    // replyTo（1-based）→ 事件下标；缺省/无效/越界 → 回复最后一条
+    let targetIndex = events.length - 1;
+    if (directive.replyTo !== null && directive.replyTo >= 1 && directive.replyTo <= events.length) {
+        targetIndex = directive.replyTo - 1;
+    }
+    const targetEvent = events[targetIndex];
+    const targetLabel = resolveMemberLabel(config, (0, core.firstNonBlank)((0, core.asText)(targetEvent.userOpenId).trim(), (0, core.asText)(targetEvent.authorId).trim()), groupOpenId);
+    // 锚点时效安全阀：QQ 群被动回复约 5 分钟时效，预留 60s 安全边界（4 分钟窗口）
     const anchorAgeMs = Date.now() - (bucket.lastAt || Date.now());
     const GROUP_PASSIVE_REPLY_WINDOW_MS = 4 * 60 * 1000;
-    if (anchorAgeMs > GROUP_PASSIVE_REPLY_WINDOW_MS) {
-        const records = await readAutoReplyRecordsAsync();
-        const nowIso = new Date().toISOString();
-        for (let index = 0; index < events.length; index += 1) {
-            const eventKey = buildEventKey(events[index]);
-            if (!eventKey) {
-                continue;
-            }
-            records[eventKey] = {
-                status: "anchor_expired_dropped",
-                chatId: (0, core.asText)(generated.chatId).trim(),
-                aiResponse,
-                failCount: 0,
-                lastError: `anchor_expired: age=${Math.round(anchorAgeMs / 1000)}s (over ${GROUP_PASSIVE_REPLY_WINDOW_MS / 1000}s safe window)`,
-                updatedAt: nowIso,
-                scene: "group",
-                messageId: (0, core.asText)(events[index].messageId).trim(),
-                aggregateKey: aggregateEventKey
-            };
-        }
-        await writeAutoReplyRecordsAsync(records);
-        const eventKeys = [];
-        for (let index = 0; index < events.length; index += 1) {
-            const eventKey = buildEventKey(events[index]);
-            if (eventKey) {
-                eventKeys.push(eventKey);
-            }
-        }
-        if (eventKeys.length > 0) {
-            await gateway.removeGatewayEvents(eventKeys, 8000);
-        }
-        return {
-            eventKey: aggregateEventKey,
-            chatId: (0, core.asText)(generated.chatId).trim(),
-            replyPreview: aiResponse.slice(0, 200),
-            aggregatedCount: events.length,
-            dropped: true,
-            dropReason: "anchor_expired",
-            sendResult: {
-                scene: "group",
-                groupOpenId,
-                aggregated: true,
-                dropped: true
-            }
-        };
+    const anchorFresh = anchorAgeMs <= GROUP_PASSIVE_REPLY_WINDOW_MS;
+    // 幂等保护：同批事件已成功发送过（records[aggregateEventKey].sent）→ 不再重复发送
+    const aggregateRecords = await readAutoReplyRecordsAsync();
+    const alreadySent = aggregateRecords[aggregateEventKey] && aggregateRecords[aggregateEventKey].status === "chat_done" && aggregateRecords[aggregateEventKey].sent === true;
+    let status = "aggregated_replied";
+    let sendResult = { scene: "group", groupOpenId, aggregated: true };
+    let dropped = false;
+    let dropReason = "";
+    let proactive = false;
+    if (alreadySent) {
+        status = "aggregated_replied_already";
+        sendResult = { ...sendResult, replyToIndex: targetIndex + 1, replyToLabel: targetLabel, alreadySent: true };
     }
-    await sendReplyChunksToQQAsync(lastEvent, aiResponse, config.groupWaifuFlushSentences || 5);
+    else if (anchorFresh) {
+        // 时效内：按 replyTo 锚点被动回复（多段共用同一锚点，msg_seq 递增）
+        const chunkResult = await sendReplyChunksToQQAsync(targetEvent, replyContent, config.groupWaifuFlushSentences || 5);
+        sendResult = { ...sendResult, replyToIndex: targetIndex + 1, replyToLabel: targetLabel, ...chunkResult };
+    }
+    else if (directive.fallbackPreference === "active_send") {
+        // 过期 + active_send：主动点名发送（尽力而为，平台是否接受需实机验证）
+        const prefixed = `[${targetLabel}] ${replyContent}`;
+        const proactiveResult = await sendProactiveGroupMessageAsync(snapshot, groupOpenId, prefixed, 1);
+        sendResult = { ...sendResult, replyToIndex: targetIndex + 1, replyToLabel: targetLabel, proactive: true, ...proactiveResult };
+        status = "active_send_fallback";
+        proactive = true;
+    }
+    else {
+        // 过期 + drop（默认）：放弃并记录原因
+        dropped = true;
+        dropReason = "anchor_expired";
+        status = "anchor_expired_dropped";
+        sendResult = { ...sendResult, replyToIndex: targetIndex + 1, replyToLabel: targetLabel, dropped: true, dropReason };
+    }
+    // 统一：移除 Gateway 事件
     const eventKeys = [];
     for (let index = 0; index < events.length; index += 1) {
         const eventKey = buildEventKey(events[index]);
@@ -1187,6 +1277,7 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
     if (eventKeys.length > 0) {
         await gateway.removeGatewayEvents(eventKeys, 8000);
     }
+    // 统一：写 records（每条事件标记回复状态与选中编号 replyToIndex）
     const records = await readAutoReplyRecordsAsync();
     const nowIso = new Date().toISOString();
     for (let index = 0; index < events.length; index += 1) {
@@ -1195,15 +1286,30 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
             continue;
         }
         records[eventKey] = {
-            status: "aggregated_replied",
+            status,
             chatId: (0, core.asText)(generated.chatId).trim(),
             aiResponse,
             failCount: 0,
-            lastError: "",
+            lastError: dropped ? `anchor_expired: age=${Math.round(anchorAgeMs / 1000)}s (over ${GROUP_PASSIVE_REPLY_WINDOW_MS / 1000}s safe window)` : "",
             updatedAt: nowIso,
             scene: "group",
             messageId: (0, core.asText)(events[index].messageId).trim(),
-            aggregateKey: aggregateEventKey
+            aggregateKey: aggregateEventKey,
+            replyToIndex: targetIndex + 1
+        };
+    }
+    // 聚合批次幂等标记：仅真正发送成功（被动回复或 active_send）才标 sent，
+    // 之后同批事件再次 flush 走 alreadySent 分支直接跳过发送，避免重复回复。
+    if (!dropped && !alreadySent) {
+        records[aggregateEventKey] = {
+            status: "chat_done",
+            chatId: (0, core.asText)(generated.chatId).trim(),
+            aiResponse,
+            sent: true,
+            updatedAt: nowIso,
+            scene: "group",
+            aggregateKey: aggregateEventKey,
+            replyToIndex: targetIndex + 1
         };
     }
     await writeAutoReplyRecordsAsync(records);
@@ -1212,11 +1318,12 @@ async function flushGroupBucketAsync(config, groupOpenId, bucket) {
         chatId: (0, core.asText)(generated.chatId).trim(),
         replyPreview: aiResponse.slice(0, 200),
         aggregatedCount: events.length,
-        sendResult: {
-            scene: "group",
-            groupOpenId,
-            aggregated: true
-        }
+        replyToIndex: targetIndex + 1,
+        replyToLabel: targetLabel,
+        dropped,
+        dropReason,
+        proactive,
+        sendResult
     };
 }
 async function flushDueGroupBucketsAsync(config) {
