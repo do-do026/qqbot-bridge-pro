@@ -107,6 +107,9 @@ function makeEvent(overrides) {
     const p10 = G3.parseGroupReplyDirective("   ");
     assert(p10.replyTo === null && p10.content === "", "空白输入不崩溃");
 
+    const p11 = G3.parseGroupReplyDirective('<think>她心情好了，不需要再说什么。</think>{"replyTo":1,"content":"接住她的猫劲儿"}（正文）');
+    assert(p11.replyTo === 1 && p11.content === "接住她的猫劲儿", "<think> 思维链剥离后仍能解析协议头");
+
     // ===== 2) buildStableAggregateKey：稳定批次键 =====
     const ev1 = makeEvent({ eventId: "evt_A", content: "1" });
     const ev2 = makeEvent({ eventId: "evt_B", content: "2" });
