@@ -940,11 +940,22 @@ async function sendReplyToQQAsync(event, replyText, msgSeq = 1) {
     const snapshot = await (0, state.requireConfiguredSnapshotAsync)();
     const scene = (0, core.asText)(event.scene).trim().toLowerCase();
     const replyHint = event.replyHint;
+    // G3（2026-08-13）：群聊被动回复同时携带 message_reference，
+    // 让客户端显示「引用回复」气泡。仅传 msg_id 只保证平台侧是回复（ref_idx），
+    // QQ 客户端不会因此显示引用样式。
+    let messageReference;
+    if (scene === "group") {
+        const refMsgId = (0, core.firstNonBlank)((0, core.asText)(event.messageReference && event.messageReference.message_id).trim(), (0, core.asText)(replyHint && replyHint.msg_id).trim());
+        if (refMsgId) {
+            messageReference = { message_id: refMsgId };
+        }
+    }
     const body = (0, core.buildSendBody)({
         content: replyText,
         msg_id: replyHint?.msg_id ?? "",
         event_id: replyHint?.event_id ?? "",
-        msg_seq: msgSeq
+        msg_seq: msgSeq,
+        message_reference: messageReference
     });
     if (scene === "group") {
         const groupOpenId = (0, core.firstNonBlank)(replyHint?.group_openid ?? "", (0, core.asText)(event.groupOpenId));
@@ -1059,12 +1070,14 @@ async function buildGroupAggregateMessageAsync(config, snapshot, events) {
 //   active_send → 主动群消息点名发送（尽力而为，平台是否接受需实机验证）
 //   drop（默认）→ 放弃发送并记录 anchor_expired
 function parseGroupReplyDirective(aiResponse) {
+    const rawText = (0, core.asText)(aiResponse).trim();
     const directive = {
         replyTo: null,
-        content: (0, core.asText)(aiResponse).trim(),
+        content: rawText,
         fallbackPreference: "drop"
     };
-    const text = directive.content;
+    // 先剥离角色卡 <think> 思维链块，避免其中的花括号干扰 JSON 定位
+    const text = rawText.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     if (!text) {
         return directive;
     }
@@ -1139,7 +1152,7 @@ function buildGroupAggregateContextAttachment(config, aggregateEvent, aggregated
         `groupOpenId: ${(0, core.asText)(aggregateEvent.groupOpenId).trim()}`,
         "",
         "instruction: 这是群内多条消息聚合后的结果（每条已编号[#N]并标注发言者）。请从中选择值得回应的内容回复，可点名回应某位群友，也可以整体回应；不要逐条回复，不要刷屏。",
-        "replyToProtocol: 若要精确回复某条消息，请在回复开头输出 JSON 控制头（仅模型解析，不会发送给用户）：{\"replyTo\":消息编号,\"content\":\"回复正文\",\"fallbackPreference\":\"active_send\"}。replyTo 缺省回复最后一条；fallbackPreference 为 active_send（锚点过期时主动点名发送）或 drop（放弃，默认）。"
+        "replyToProtocol: 【必读·群聚合回复协议】若你想精确回复本批中的某条消息，回复正文必须以 JSON 控制头开头（独占第一行，仅插件解析、绝不会发给群友）：{\"replyTo\":消息编号,\"content\":\"你的回复正文\",\"fallbackPreference\":\"active_send\"}。replyTo 填想回复的消息编号（1-based，缺省=最后一条）；回复正文写在 content 字段。若整体回应不需点名某条，可省略控制头直接回复。多段长回复时控制头只需出现一次（首条）。"
     ];
     const timestamp = (0, core.asText)(aggregateEvent.timestamp).trim();
     if (timestamp) {
