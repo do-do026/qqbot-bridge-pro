@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro: Epic G3 replyTo implemented (numbered replyTo, stable batch key, anchor fallback) + docs updated 2026-08-12"
+COMMIT_MSG = "qqbot-pro: G3 message_reference quote fix + think-strip parsing + honest docs (plan vs done) 2026-08-13"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
