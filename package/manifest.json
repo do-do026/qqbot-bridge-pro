@@ -8,8 +8,8 @@
     "en": "QQ Bot Pro"
   },
   "description": {
-    "zh": "在 Operit 原 QQ Bot 工具包（com.operit.qqbot_bundle）基础上补齐官方 v2 API 能力的增强包。独立安装、独立配置，不修改原包。能力：撤回消息、Markdown/引用/输入态发送、群信息/机器人群状态/机器人资料查询、增强版 Gateway（事件全放开 + 按钮回调回应）、自动回复桥（QQ→Operit→AI→QQ，合并自 qqbot-bridge-pro v1.0.0：C2C 绑定/群聚合/上下文缓存/持久化恢复/waifu 切分）。",
-    "en": "An enhancement bundle over Operit's QQ Bot bundle, adding official v2 APIs. Independent install, does not modify the original bundle. Capabilities: recall, markdown/reference/input-notify sending, group info / bot state / bot profile queries, enhanced Gateway with all events, and auto-reply bridge (QQ→Operit→AI→QQ, merged from qqbot-bridge-pro v1.0.0)."
+    "zh": "面向 Operit 的 QQ Bot 双向通道增强包（含自动回复桥）。独立安装、独立配置，复用原包的 QQBOT_APP_ID/APP_SECRET 凭证（同 AppID 下 Gateway 与原包二选一运行）。基础 API：撤回消息、Markdown/引用/输入态发送、群信息/机器人群状态/机器人资料查询；增强 Gateway：事件全放开（含按钮回调与群生命周期事件）、按钮回调回应；自动回复桥（QQ→Operit→AI→QQ）：按 openid/group_openid 分对话、C2C 固定绑定、群触发分流（@/关键词）、每群聚合窗口、群上下文缓存与可配置时长恢复（默认24h）、回复分段、角色卡、群成员身份映射、AI 可精确回复指定消息（编号选择+引用，真机验证中）。",
+    "en": "A QQ Bot bidirectional channel enhancement for Operit with a built-in auto-reply bridge. Independent install & config; reuses the original bundle's QQBOT_APP_ID/APP_SECRET credentials (Gateway is mutually exclusive with the original under the same AppID). Basic APIs: recall, markdown/reference/input-notify sending, group info / bot state / profile queries. Enhanced Gateway: all events released (button callbacks & group lifecycle), interaction responses. Auto-reply bridge (QQ→Operit→AI→QQ): per openid/group_openid chats, C2C fixed bindings, group trigger modes (@/keywords), per-group aggregation window, group context cache with configurable recovery (24h default), reply chunking, character card, member identity mapping, and AI precise reply-to-selected-message (numbered + reference, device verification in progress)."
   },
   "enabled_by_default": true,
   "subpackages": [
@@ -48,8 +48,8 @@
         "en": "QQ Bot Pro Auto Reply"
       },
       "description": {
-        "zh": "QQ 消息桥入 Operit 对话并回发 AI 回复（合并自 qqbot-bridge-pro v1.0.0）。C2C 按 openid 分对话/固定绑定、群按 group_openid 聚合、上下文环形缓存与当天恢复、并发 flush、waifu 切分、角色卡与 env 配置。",
-        "en": "Bridge QQ messages into Operit chats and send AI replies back (merged from qqbot-bridge-pro v1.0.0). C2C per-openid chats/fixed bindings, group aggregation per group_openid, context ring cache with same-day recovery, concurrent flush, waifu flush, character card and env config."
+        "zh": "QQ 消息桥入 Operit 对话并回发 AI 回复（合并自 qqbot-bridge-pro v1.0.0）。C2C 按 openid 分对话/固定绑定、群按 group_openid 聚合、群触发分流（@/关键词）、上下文缓存与可配置时长恢复（默认24h）、并发 flush、回复分段、群成员身份映射、角色卡与 env 配置；支持 AI 精确回复指定消息（编号选择+引用，真机验证中）。",
+        "en": "Bridge QQ messages into Operit chats and send AI replies back (merged from qqbot-bridge-pro v1.0.0). C2C per-openid chats/fixed bindings, group aggregation per group_openid with @/keyword trigger modes, context cache with configurable recovery (24h default), concurrent flush, reply chunking, member identity mapping, character card and env config; AI precise reply-to-selected-message (numbered + reference, device verification in progress)."
       }
     }
   ],
