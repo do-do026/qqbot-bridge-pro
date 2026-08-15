@@ -63,7 +63,7 @@
 | G7 最小版 | 群成员 openid → 显示名 | ✅ 完成 |
 | **G3 replyTo** | 编号回复、稳定批次键、引用锚点、过期降级 | ✅ **代码完成 + 已烧录**（单测 21/21）；**引用气泡已确认平台限制**（群聊被动回复客户端不渲染引用卡片，见 §6） |
 | G7 完整版 | UI 管理群成员绑定 | ⬜ 待做 |
-| G5 Hook 探针 | 非落盘桥接 Prompt 验证 | ⬜ 待做 |
+| G5 Hook 探针 | 验证 automatic 上下文是否落盘 | ✅ **已验证（会落盘）**；决策：接受落盘 + 文档标注（未来可走 Prompt Hook 隔离） |
 | 可靠性 Sprint | 事务幂等、token 缓存、错误码/Trace ID | ⬜ 待做 |
 | G6 UI | 完整设置界面 | ⬜ 待做（宿主阻塞） |
 
@@ -87,7 +87,7 @@
 
 - 双 C2C 用户互不串线尚未正式双账号实测（设计已按 openid 隔离）。
 - `qqbot_pro_group_context` 与 automatic 附件依赖持久化缓存；Gateway 重启后缓存可恢复，但跨 24h 的旧缓存会丢弃（符合产品决定）。
-- automatic 上下文随 `userMessage` 附件 + `persist_turn: true` 传入，是否进入 Operit 历史未验证（G5 探针）。
+- automatic 上下文随 `userMessage` 附件 + `persist_turn: true` 传入，**已确认会落盘**进 Operit 历史（G5 验证 2026-08-16：Operit 源码 `shouldAddUserMessageToChat = persistTurn && ...` 会把含 `<attachment>` 的用户消息写入历史，v1.11.0/v1.12.1/main 三版一致）。接受现状；未来若要隔离，可复用 `com.operit.message_insert_bundle` 的 Prompt Hook「注入但不落盘」机制。
 - 聚合键含时间戳，同批重试幂等不完整（G3 修复）。
 - 发送成功与事件移除非原子，极端情况下可能重复回复（可靠性 Sprint）。
 - 图片多目录浏览/筛选专用工具未完成。
@@ -122,6 +122,7 @@
 - G4 统一 chunker（私聊3/群5）
 - T045 业务码校验 + segmentResults / T046 watchdog + 硬超时
 - G3 稳定批次键 / 聚合编号 / 协议解析 / 锚点被动回复 / drop 降级（单测 21/21）
+- **G5 落盘验证（2026-08-16）**：已确认 automatic 上下文随 `persist_turn` 落盘进 Operit 历史（v1.11.0/v1.12.1/main 源码三版一致）；决策：接受落盘 + 文档标注，未来可用 Prompt Hook 隔离
 
 ### 🟡 已实现待验证
 
@@ -136,10 +137,9 @@
 ### 🔴 仅规划、未实现
 
 - **G7 完整版**：用 UI 管理群成员绑定（当前只能走配置 API）
-- **G5 Hook 探针**：验证 automatic 上下文附件是否真正不落 Operit 历史
 - **可靠性 Sprint**：事务级幂等（QQ 已发/队列移除失败）、access_token 缓存、错误码/Trace ID 结构化
 - **G6 UI**：完整设置界面（宿主 compose_dsl 阻塞）
 - **原生 @ / 引用样式真机验收**：群内客户端原生 @ 行为
 - **官方 stream_messages**：产品决定不做（明确不做，不算规划）
 
-*本文件由渡渡与初尘维护，每次迭代结束必须同步更新。下一步主线：G5 Hook 探针（验证 automatic 上下文附件是否落盘）。*
+*本文件由渡渡与初尘维护，每次迭代结束必须同步更新。下一步主线：可靠性 Sprint（事务幂等 / token 缓存 / 错误码结构化）。*
