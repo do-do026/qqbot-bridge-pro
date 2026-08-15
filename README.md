@@ -37,7 +37,7 @@
 - 群聊 `@/关键词 → 聚合 → AI → QQ` 已真实闭环。
 - 群上下文 automatic 模式已真实验证，AI 能读取触发消息附近的普通群消息。
 - G0 配置模型、G1 群分流与缓存、G2 上下文三态、G4 统一 chunker、G7 最小成员绑定已经完成。
-- 当前开发入口是 G3：让 AI 从聚合批次中选择具体回复目标，并实现引用锚点与过期降级。
+- 当前开发入口：可靠性 Sprint（事务幂等 / access_token 缓存 / 错误码结构化）；G3 replyTo 已完成（引用气泡受平台限制，见 ARCHITECTURE §7.5）。
 
 实时进度见 [STATUS.md](STATUS.md)，工程设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，冷启动接续见 [HANDOFF.md](HANDOFF.md)。历史设计、变更和排障记录在 [bridge-docs](bridge-docs/) 中。
 
@@ -49,7 +49,7 @@
 4. openid 属于 Bot/AppID 或群关系维度，不是 QQ 号；不同 AppID 下不能自行合并身份。
 5. 主动消息受用户开关、机器人权限、关系状态和平台频控约束，插件不能绕过。
 6. 普通群消息缓存本身不消耗模型 token；automatic 模式在触发时附带上下文，会消耗该次模型调用的 token。
-7. 当前 automatic 上下文通过 `userMessage` 附件传入且该轮使用 `persist_turn: true`。在 G5 Hook 验证完成前，不应承诺附件绝对不进入 Operit 历史。
+7. automatic 上下文通过 `userMessage` 附件传入且该轮使用 `persist_turn: true`，**已确认会随本轮落盘进 Operit 历史**（G5 验证 2026-08-16）；如需隔离需走 Prompt Hook 机制（当前接受现状）。
 
 ## 工程位置
 
@@ -77,13 +77,13 @@
 
 ## Roadmap（规划中，尚未实现）
 
-> 详细对照见 STATUS.md §6（架构规划 vs 已实现）。当前主线：G3 真机验证（引用气泡）。
+> 详细对照见 STATUS.md §6（架构规划 vs 已实现）。当前主线：可靠性 Sprint（事务幂等 / token 缓存 / 错误码结构化）。
 
 - **G7 完整版**：用界面管理群成员绑定（当前为配置 API）。
-- **G5 Hook 探针**：验证 automatic 上下文附件是否真正不落 Operit 历史。
 - **可靠性 Sprint**：事务级幂等、access_token 缓存、错误码/Trace ID 结构化。
 - **G6 UI**：完整设置界面（宿主 compose_dsl 阻塞）。
 - **双账号隔离实测**：两个 C2C 用户互不串线的真机验收。
+- **automatic 上下文落盘隔离**（可选）：用 Prompt Hook「注入但不落盘」替代当前随轮次落盘（G5 已验证会落盘，接受现状）。
 - **明确不做**：官方 stream_messages（产品决定放弃）。
 
 ## License
