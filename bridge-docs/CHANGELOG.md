@@ -2,6 +2,15 @@
 
 ## 2026-08-16
 
+### 🔍 G5 落盘验证结论（05:21-05:30）
+- **结论**：automatic 上下文（`<attachment>` 拼在 `messageText`）**会随 `persist_turn:true` 落盘进 Operit 对话历史**。
+- **证据链**（Operit 源码，v1.12.1 生产 / v1.11.0 / main 三版一致）：
+  - `ChatTurnOptions(persistTurn = true)` → `sendUserMessage` → `shouldAddUserMessageToChat = persistTurn && ...` → `addMessageToChat(chatId, userMessage)`。
+  - `AIMessageManager.buildUserMessageContent` 里 `processedMessageText`（含 `<attachment>`）不剥离，原样进入 `finalMessageContent`，即用户消息 `content`。
+- **决策**：接受落盘 + 文档诚实标注（方案①）。未来可选：复用 `com.operit.message_insert_bundle` 的 Prompt Hook「注入但不落盘」机制做隔离。
+- **生产版本确认**：`com.ai.assistance.operit` versionName=1.12.1（versionCode 46）。
+- **文档**：STATUS §3/§5.1/§6、ARCHITECTURE §10/§11、README 运行原则/Roadmap、HANDOFF 顶部已更新，下一步主线转向可靠性 Sprint。
+
 ### 🔧 G3 引用气泡平台限制确认 + 文档定稿（05:00-05:12）
 - **结论**：`message_reference` 已正确发出、平台返回 `ref_idx`（引用索引），但群聊机器人被动回复场景下 QQ 客户端按 `msg_id`（被动回复）渲染，**不渲染引用卡片**——平台/客户端限制，非 bug。
 - **依据**：官方 botgo SDK `MessageToCreate` 结构体确认 `msg_id`（被动回复，为空才是主动消息）与 `message_reference`（引用）是独立字段；同时传时客户端优先按被动回复渲染。
