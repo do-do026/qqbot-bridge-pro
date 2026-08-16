@@ -16,7 +16,7 @@ REPO = "qqbot-bridge-pro"
 BRANCH = "main"
 API = f"https://api.github.com/repos/{OWNER}/{REPO}"
 BASE = "/sdcard/Download/qqbot-pro"
-COMMIT_MSG = "qqbot-pro: G5 verified automatic context persists to Operit history, accept + doc honesty, next mainline reliability sprint 2026-08-16"
+COMMIT_MSG = "qqbot-pro: G6 settings UI completed (screen placeholder fix, LazyColumn scroll, schema-aligned fields) 2026-08-16"
 
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 if not TOKEN:
