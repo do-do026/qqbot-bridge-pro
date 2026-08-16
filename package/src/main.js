@@ -13,16 +13,17 @@ function logStartup(message) {
 function registerToolPkg() {
     logStartup("registerToolPkg start");
 
-    // NOTE(T16→T036): 外部 ToolPkg 的设置页 UI 应使用 registerUiRoute + registerNavigationEntry
-    // （参考成功案例 com.operit.mood_panel），而非内置包专用的 registerToolboxUiModule。
-    // screen 传包内相对路径字符串，由宿主加载；保留 try-catch，UI 失败不拖垮工具/hooks。
+    // NOTE(T16→T036→G6): 外部 ToolPkg 的设置页 UI 用 registerUiRoute + registerNavigationEntry
+    // （参考 com.operit.mood_panel / examples/qqbot）。screen 必须传「模块函数」（require 进来的
+    // ComposeDslScreen），不能传字符串路径（宿主无法加载 Screen）。保留 try-catch，UI 失败不拖垮工具/hooks。
     try {
+        const qqbotSettingsScreen = require("./ui/qqbot_settings/index.ui.js");
         const UI_ROUTE = "toolpkg:com.operit.qqbot_pro:ui:qqbot_pro_settings";
         ToolPkg.registerUiRoute({
             id: "qqbot_pro_settings",
             route: UI_ROUTE,
             runtime: "compose_dsl",
-            screen: "dist/ui/qqbot_settings/index.ui.js",
+            screen: qqbotSettingsScreen,
             params: {},
             keepAlive: false,
             title: { zh: "QQ Bot Pro 设置", en: "QQ Bot Pro Settings" }
