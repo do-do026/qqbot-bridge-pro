@@ -2,12 +2,23 @@
 
 ## 2026-08-16
 
+### 🎉 G6 设置 UI 完成（15:36-17:50）
+- **A 修入口**：`screen` 必须传 `require("./ui/...index.ui.js")` 的占位符函数（注册模式下宿主返回带 `__operit_toolpkg_module_path` 的占位符，非 `{default}`），不能加 `.default` 也不能传字符串路径。
+- **B 重写 UI**：对齐 bridge_config.js schema，去掉废弃字段（target_chat_id / groupAutoCreateChat / groupTargetChatId / groupAggregateMaxItems），补齐 groupMessageMode / groupKeywords / groupContextMode/Before/After/Limit / groupMemberBindings / groupAiTimeoutMs / groupFlushConcurrency / groupCacheRecoveryMaxAgeMs / proactiveC2cOpenId。
+- **踩坑**：compose_dsl 组件集很小，无 FilterChip/Radio/Select → 选项用 Button + `●/○` 标记；`Column` 不滚动 → 换 `LazyColumn`（content 数组）；文案字典漏 6 个选项键导致 undefined → 补齐。
+- **真机**：入口、渲染、滚动、按钮文字全部通过（初尘确认）。
+- **文档**：STATUS §1/§3/§6、ARCHITECTURE §10/§11、README 已更新，G6 从「宿主阻塞」改为「✅完成」，规划路线移除 G6。
+- **下一步主线**：可靠性 Sprint（事务幂等 / token 缓存 / 错误码结构化）。
+
+## 2026-08-16
+
 ### 🔍 G5 落盘验证结论（05:21-05:30）
 - **结论**：automatic 上下文（`<attachment>` 拼在 `messageText`）**会随 `persist_turn:true` 落盘进 Operit 对话历史**。
 - **证据链**（Operit 源码，v1.12.1 生产 / v1.11.0 / main 三版一致）：
   - `ChatTurnOptions(persistTurn = true)` → `sendUserMessage` → `shouldAddUserMessageToChat = persistTurn && ...` → `addMessageToChat(chatId, userMessage)`。
   - `AIMessageManager.buildUserMessageContent` 里 `processedMessageText`（含 `<attachment>`）不剥离，原样进入 `finalMessageContent`，即用户消息 `content`。
 - **决策**：接受落盘 + 文档诚实标注（方案①）。未来可选：复用 `com.operit.message_insert_bundle` 的 Prompt Hook「注入但不落盘」机制做隔离。
+- **Prompt Hook 风险核实（补充）**：`registerPromptFinalizeHook` 是 ToolPkg 通用能力（内置/外置包均可用，`examples/message_insert` 为官方模板）；宿主 `PromptHookRegistry` 对每个 hook 用 `runCatching` 包裹（异常仅记日志+跳过，不中断发送），并有 `onHookTimeout` 超时兜底。外置包用 hook 不会导致宿主崩溃，软风险仅剩「阻塞拖慢/版本漂移/污染 prompt」三项，需自律不写阻塞与重活代码。
 - **生产版本确认**：`com.ai.assistance.operit` versionName=1.12.1（versionCode 46）。
 - **文档**：STATUS §3/§5.1/§6、ARCHITECTURE §10/§11、README 运行原则/Roadmap、HANDOFF 顶部已更新，下一步主线转向可靠性 Sprint。
 
