@@ -36,8 +36,8 @@
 - C2C 私聊 `QQ → Operit → AI → QQ` 已真实闭环，长回复 8 段全部送达。
 - 群聊 `@/关键词 → 聚合 → AI → QQ` 已真实闭环。
 - 群上下文 automatic 模式已真实验证，AI 能读取触发消息附近的普通群消息。
-- G0 配置模型、G1 群分流与缓存、G2 上下文三态、G4 统一 chunker、G7 最小成员绑定已经完成。
-- 当前开发入口：可靠性 Sprint（事务幂等 / access_token 缓存 / 错误码结构化）；G3 replyTo 已完成（引用气泡受平台限制，见 ARCHITECTURE §7.5）。
+- G0 配置模型、G1 群分流与缓存、G2 上下文三态、G4 统一 chunker、G5 落盘验证、G7 最小成员绑定、G3 replyTo、G6 设置 UI 均已完成。
+- 当前开发入口：可靠性 Sprint（事务幂等 / access_token 缓存 / 错误码结构化）。
 
 实时进度见 [STATUS.md](STATUS.md)，工程设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，冷启动接续见 [HANDOFF.md](HANDOFF.md)。历史设计、变更和排障记录在 [bridge-docs](bridge-docs/) 中。
 
@@ -81,7 +81,6 @@
 
 - **G7 完整版**：用界面管理群成员绑定（当前为配置 API）。
 - **可靠性 Sprint**：事务级幂等、access_token 缓存、错误码/Trace ID 结构化。
-- **G6 UI**：完整设置界面（宿主 compose_dsl 阻塞）。
 - **双账号隔离实测**：两个 C2C 用户互不串线的真机验收。
 - **automatic 上下文落盘隔离**（可选）：用 Prompt Hook「注入但不落盘」替代当前随轮次落盘（G5 已验证会落盘，接受现状）。
 - **明确不做**：官方 stream_messages（产品决定放弃）。
